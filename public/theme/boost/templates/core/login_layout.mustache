@@ -1,0 +1,34 @@
+{{!
+    @template core/login_layout
+    AMTO Split-screen login layout (inspired by CeLOE LMS layout, tailored for AMTO)
+}}
+<div id="page-content" class="amto-login-split min-vh-100 row g-0">
+    <aside class="amto-login-left col-lg-7 d-none d-lg-flex">
+        {{> core/login_panel }}
+    </aside>
+    <div id="region-main" class="amto-login-right col-12 col-lg-5 d-flex flex-column justify-content-between">
+        <div class="amto-login-topbar">
+            <a href="/?redirect=0" class="amto-back-link">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                    <polyline points="12 19 5 12 12 5"></polyline>
+                </svg>
+                <span>Back to home</span>
+            </a>
+        </div>
+
+        <div id="region-main-box" class="amto-login-center">
+            <div class="amto-login-box">
+                {{{ output.main_content }}}
+            </div>
+        </div>
+
+        <div class="amto-login-footer">
+            <span>&copy; 2026 AMTO Aircraft Maintenance Training Organization. All rights reserved</span>
+            <div class="amto-login-footer-links">
+                <a href="#">Privacy policy</a>
+                <a href="#">Terms and conditions</a>
+            </div>
+        </div>
+    </div>
+</div>
