@@ -277,11 +277,13 @@ class primary implements renderable, templatable {
         $role = function_exists('amto_get_effective_role') ? amto_get_effective_role() : 'admin';
 
         if ($role === 'student') {
-            $custommenuitems = "Kelas & Materi Saya|/my/courses.php\n"
+            $custommenuitems = "Jadwal & Data Peserta|/amto/jadwal.php\n"
+                . "-Jadwal Pelatihan & Batch Saya|/amto/jadwal.php\n"
+                . "-Data & Berkas Registrasi Saya|/amto/registrasi.php\n"
+                . "-Kalender Pelatihan Bulanan|/calendar/view.php?view=month\n"
+                . "Kelas & Materi Saya|/my/courses.php\n"
                 . "-Kelas Pelatihan Saya|/my/courses.php\n"
-                . "-Katalog Materi LMS|/course/index.php\n"
-                . "Jadwal & Presensi|/calendar/view.php?view=month\n"
-                . "-Kalender Jadwal Pelatihan|/calendar/view.php?view=month\n"
+                . "-Katalog Repository Modul AMTO|/amto/repository.php\n"
                 . "Ujian & Logbook|/grade/report/overview/index.php\n"
                 . "-Daftar Ujian Aktif|/my/courses.php\n"
                 . "-Practical Logbook Saya|/grade/report/overview/index.php\n"
@@ -290,11 +292,12 @@ class primary implements renderable, templatable {
                 . "-Status Sertifikasi Saya|/badges/mybadges.php\n"
                 . "-Profil Peserta|/user/profile.php";
         } else if ($role === 'instructor') {
-            $custommenuitems = "Kelas Penugasan|/my/courses.php\n"
+            $custommenuitems = "Kelas & Jadwal Mengajar|/amto/jadwal.php\n"
+                . "-Jadwal Mengajar & Ruangan (AMTO)|/amto/jadwal.php\n"
                 . "-Daftar Kelas Mengajar|/my/courses.php\n"
                 . "-Kalender Jadwal Mengajar|/calendar/view.php?view=month\n"
                 . "Materi & Presensi|/course/index.php\n"
-                . "-Kelola Materi Kelas (LMS)|/course/index.php\n"
+                . "-Kelola Materi Kelas (Repository LMS)|/course/index.php\n"
                 . "-Input & Koreksi Presensi|/course/index.php\n"
                 . "Ujian & Assessment|/question/edit.php?courseid=1\n"
                 . "-Bank Soal & Ujian|/question/edit.php?courseid=1\n"

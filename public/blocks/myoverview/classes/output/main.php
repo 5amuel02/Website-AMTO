@@ -549,30 +549,46 @@ class main implements renderable, templatable {
         if (function_exists('amto_get_effective_role')) {
             $effrole = amto_get_effective_role();
             if ($effrole === 'student') {
-                $jadwalbtn = new \single_button(
-                    new \moodle_url('/calendar/view.php', ['view' => 'month']),
-                    'Lihat Jadwal Pelatihan',
+                $regbtn = new \single_button(
+                    new \moodle_url('/amto/registrasi.php'),
+                    'Data & Berkas Registrasi Saya',
                     'get',
                     \single_button::BUTTON_PRIMARY
+                );
+                $jadwalbtn = new \single_button(
+                    new \moodle_url('/amto/jadwal.php'),
+                    'Lihat Jadwal & Batch Pelatihan',
+                    'get'
                 );
                 return [
                     'nocoursesimg' => $nocoursesimg->out(),
                     'title' => 'Belum ada kelas pelatihan yang diikuti',
-                    'intro' => 'Anda belum terdaftar pada kelas pelatihan aktif. Silakan cek jadwal pelatihan atau hubungi Training Manager AMTO untuk penugasan kelas Anda.',
-                    'buttons' => [$jadwalbtn->export_for_template($output)],
+                    'intro' => 'Anda belum terdaftar pada kelas pelatihan aktif. Silakan pilih jadwal batch pelatihan yang tersedia atau cek status verifikasi pendaftaran Anda.',
+                    'buttons' => [
+                        $regbtn->export_for_template($output),
+                        $jadwalbtn->export_for_template($output),
+                    ],
                 ];
             } else if ($effrole === 'instructor') {
-                $kelasbtn = new \single_button(
-                    new \moodle_url('/course/index.php'),
-                    'Lihat Daftar Kelas Penugasan',
+                $jadwalbtn = new \single_button(
+                    new \moodle_url('/amto/jadwal.php'),
+                    'Lihat Jadwal Mengajar & Ruangan',
                     'get',
                     \single_button::BUTTON_PRIMARY
+                );
+                $kelasbtn = new \single_button(
+                    new \moodle_url('/amto/repository.php'),
+                    'Buka Repository Materi LMS',
+                    'get'
                 );
                 return [
                     'nocoursesimg' => $nocoursesimg->out(),
                     'title' => 'Belum ada kelas penugasan mengajar',
-                    'intro' => 'Anda belum memiliki kelas mengajar aktif. Setelah ditugaskan oleh Training Manager, daftar kelas, materi, presensi, dan verifikasi logbook peserta akan tampil di sini.',
-                    'buttons' => [$kelasbtn->export_for_template($output)],
+                    'intro' => 'Anda belum memiliki kelas mengajar aktif di Dashboard. Silakan cek Jadwal Mengajar & Ruangan (Teori/Hangar) atau buka Repository Materi LMS.',
+                    'buttons' => [
+                        $jadwalbtn->export_for_template($output),
+                        $kelasbtn->export_for_template($output),
+                    ],
                 ];
             }
         }
