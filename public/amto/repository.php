@@ -113,7 +113,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage) {
             $rec->status = 'Published';
             $rec->timecreated = time();
 
-            $DB->insert_record('amto_repository', $rec);
+            $new_mod_id = $DB->insert_record('amto_repository', $rec);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('REPO_MODULE_UPLOAD', 'amto_repository', (int)$new_mod_id, "module={$module_code}, ver={$rec->doc_version}", "Uploaded training manual {$title}, SHA256=" . ($rec->file_hash ?: 'none'));
+            }
 
             $m = "Modul [{$module_code}] {$title} berhasil ditambahkan ke LMS Repository AMTO.";
             header('Location: /amto/repository.php?msg=' . urlencode($m));

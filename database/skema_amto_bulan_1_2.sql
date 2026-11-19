@@ -128,6 +128,27 @@ LOCK TABLES `mdl_amto_repository` WRITE;
 /*!40000 ALTER TABLE `mdl_amto_repository` DISABLE KEYS */;
 /*!40000 ALTER TABLE `mdl_amto_repository` ENABLE KEYS */;
 UNLOCK TABLES;
+
+--
+-- Table structure for table `mdl_amto_audit_logs` (SEC-05 & LOG-01..LOG-09)
+--
+
+DROP TABLE IF EXISTS `mdl_amto_audit_logs`;
+CREATE TABLE `mdl_amto_audit_logs` (
+  `id` bigint(10) NOT NULL AUTO_INCREMENT,
+  `event_code` varchar(60) NOT NULL,
+  `target_table` varchar(60) NOT NULL,
+  `target_id` bigint(10) NOT NULL DEFAULT 0,
+  `actor_userid` bigint(10) NOT NULL DEFAULT 0,
+  `actor_username` varchar(100) NOT NULL DEFAULT 'guest',
+  `actor_role` varchar(50) NOT NULL DEFAULT 'guest',
+  `ip_address` varchar(64) NOT NULL DEFAULT '',
+  `change_summary` varchar(255) NOT NULL DEFAULT '',
+  `details` text DEFAULT NULL,
+  `timecreated` bigint(10) NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;

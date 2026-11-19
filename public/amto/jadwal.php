@@ -40,7 +40,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage_sched) {
         $rec->timecreated = time();
 
         if ($rec->batch_code !== '' && $rec->program_name !== '') {
-            $DB->insert_record('amto_schedules', $rec);
+            $new_sched_id = $DB->insert_record('amto_schedules', $rec);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('SCHEDULE_CREATE', 'amto_schedules', (int)$new_sched_id, "batch={$rec->batch_code}", "Created training schedule {$rec->program_name} ({$rec->start_date} - {$rec->end_date})");
+            }
 
             // Sync to Moodle Calendar (mdl_event)
             $ev = new stdClass();
@@ -69,8 +72,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage_sched) {
         $new_status = required_param('new_status', PARAM_TEXT);
         $sched = $DB->get_record('amto_schedules', ['id' => $sched_id]);
         if ($sched) {
+            $old_st = $sched->status;
             $sched->status = $new_status;
             $DB->update_record('amto_schedules', $sched);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('SCHEDULE_STATUS_UPDATE', 'amto_schedules', $sched_id, "status: {$old_st} -> {$new_status}", "Updated batch {$sched->batch_code} status");
+            }
             $notice_msg = "Status jadwal <strong>{$sched->batch_code}</strong> diperbarui menjadi <strong>{$new_status}</strong>.";
         }
     } else if ($action === 'delete_schedule') {

@@ -149,7 +149,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
         $record->timecreated = time();
         $record->timemodified = time();
 
-        $DB->insert_record('amto_registrations', $record);
+        $new_reg_id = $DB->insert_record('amto_registrations', $record);
+        if (function_exists('amto_log_audit_event')) {
+            amto_log_audit_event('REGISTRATION_CREATE', 'amto_registrations', (int)$new_reg_id, "reg_no={$reg_no}, status=pending", "New participant registration submitted for username={$username}, program={$prog_name}");
+        }
 
         if ($role === 'admin') {
             header('Location: /amto/registrasi.php?admin_msg=' . urlencode("Data pendaftar baru {$reg_no} ({$fullname}) berhasil ditambahkan."));
@@ -269,17 +272,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_verify_reg && in_array($action
             $reg->verified_by = $USER->id;
             $reg->timemodified = time();
             $DB->update_record('amto_registrations', $reg);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('REGISTRATION_APPROVE', 'amto_registrations', $regid, 'status: pending -> approved', "Approved registration {$reg->registration_no} ({$reg->username}), linked Moodle userid={$target_userid}");
+            }
 
             $msg = "Pendaftaran {$reg->registration_no} ({$reg->fullname}) telah DISETUJUI. Akun LMS (username: {$reg->username}) sudah aktif dan siap digunakan login!";
             header('Location: /amto/registrasi.php?admin_msg=' . urlencode($msg));
             exit;
             }
         } else {
+            $old_status = $reg->status;
             $reg->status = 'rejected';
             $reg->admin_notes = $notes !== '' ? $notes : 'Berkas prasyarat belum sesuai/kurang jelas. Mohon unggah ulang dokumen yang valid.';
             $reg->verified_by = $USER->id;
             $reg->timemodified = time();
             $DB->update_record('amto_registrations', $reg);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('REGISTRATION_REJECT', 'amto_registrations', $regid, "status: {$old_status} -> rejected", $reg->admin_notes);
+            }
 
             $msg = "Pendaftaran {$reg->registration_no} ({$reg->fullname}) telah ditandai Perlu Revisi / Ditolak.";
             header('Location: /amto/registrasi.php?admin_msg=' . urlencode($msg));
@@ -457,6 +467,7 @@ echo amto_render_shared_styles();
             </div>
             <?php if ($role === 'admin'): ?>
             <div class="d-flex gap-2">
+                <a href="/amto/audit_log.php" class="tatc-btn-outline" style="border-color:#fca5a5; color:#b91c1c !important;">🛡️ Audit Trail &amp; RBAC</a>
                 <a href="/admin/user.php" class="tatc-btn-outline">Daftar Akun Moodle</a>
                 <a href="/cohort/index.php" class="tatc-btn-outline">Lihat Cohort / Angkatan</a>
             </div>

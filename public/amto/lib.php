@@ -94,6 +94,55 @@ function amto_ensure_tables(): void {
             $DB->execute("ALTER TABLE {amto_repository} ADD COLUMN file_hash VARCHAR(64) NOT NULL DEFAULT '' AFTER file_size");
         }
     }
+
+    // 4. Table: amto_audit_logs (Immutable Security Audit Trail per SEC-05 & LOG-01 s/d LOG-09)
+    if (!$dbman->table_exists('amto_audit_logs')) {
+        $sql = "CREATE TABLE {amto_audit_logs} (
+            id BIGINT(10) NOT NULL AUTO_INCREMENT,
+            event_code VARCHAR(60) NOT NULL,
+            target_table VARCHAR(60) NOT NULL,
+            target_id BIGINT(10) NOT NULL DEFAULT 0,
+            actor_userid BIGINT(10) NOT NULL DEFAULT 0,
+            actor_username VARCHAR(100) NOT NULL DEFAULT 'guest',
+            actor_role VARCHAR(50) NOT NULL DEFAULT 'guest',
+            ip_address VARCHAR(64) NOT NULL DEFAULT '',
+            change_summary VARCHAR(255) NOT NULL DEFAULT '',
+            details TEXT DEFAULT NULL,
+            timecreated BIGINT(10) NOT NULL DEFAULT 0,
+            PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        $DB->execute($sql);
+    }
+}
+
+/**
+ * [SEC-FIX-05] SEC-05 & LOG-01..LOG-09: Append-only Security Audit Trail logger.
+ */
+function amto_log_audit_event(
+    string $event_code,
+    string $target_table,
+    int $target_id,
+    string $change_summary,
+    string $details = ''
+): void {
+    global $DB, $USER;
+    try {
+        $rec = new stdClass();
+        $rec->event_code     = strtoupper(trim($event_code));
+        $rec->target_table   = trim($target_table);
+        $rec->target_id      = $target_id;
+        $rec->actor_userid   = (!empty($USER->id) && isloggedin() && !isguestuser()) ? (int)$USER->id : 0;
+        $rec->actor_username = (!empty($USER->username) && isloggedin() && !isguestuser()) ? (string)$USER->username : 'guest';
+        $rec->actor_role     = function_exists('amto_current_rbac_role') ? amto_current_rbac_role() : 'guest';
+        $rec->ip_address     = function_exists('getremoteaddr') ? (string)getremoteaddr() : ($_SERVER['REMOTE_ADDR'] ?? '');
+        $rec->change_summary = substr($change_summary, 0, 250);
+        $rec->details        = $details;
+        $rec->timecreated    = time();
+        $DB->insert_record('amto_audit_logs', $rec);
+    } catch (Throwable $e) {
+        // Prevent logging exception from breaking transaction flow while preserving error log
+        debugging('AMTO Audit Log Error: ' . $e->getMessage(), DEBUG_DEVELOPER);
+    }
 }
 
 /**
