@@ -511,12 +511,19 @@ echo amto_render_shared_styles();
                                     </div>
                                 </td>
                                 <td>
+                                    <?php
+                                    // [SEC-FIX-06] DP-01, SCP-01 & SCP-07: Mask sensitive PII (NIK, Phone, Email) for unauthenticated Guest & Management aggregate role
+                                    $should_mask_pii = ($role === 'guest' || $rbac_role === 'management');
+                                    $disp_nik   = $should_mask_pii ? amto_mask_nik((string)$r->nik) : (string)$r->nik;
+                                    $disp_phone = $should_mask_pii ? amto_mask_phone((string)$r->phone) : (string)$r->phone;
+                                    $disp_email = ($role === 'guest') ? amto_mask_email((string)$r->email) : (string)$r->email;
+                                    ?>
                                     <div style="font-weight:700; color:#0f172a;"><?php echo s($r->fullname); ?></div>
                                     <div style="font-size:12px; color:#64748b;">
-                                        Username: <code><?php echo s($r->username); ?></code> &bull; NIK: <?php echo s($r->nik); ?>
+                                        Username: <code><?php echo s($r->username); ?></code> &bull; NIK: <?php echo s($disp_nik); ?>
                                     </div>
                                     <div style="font-size:12px; color:#64748b;">
-                                        <?php echo s($r->email); ?> &bull; <?php echo s($r->phone); ?>
+                                        <?php echo s($disp_email); ?> &bull; <?php echo s($disp_phone); ?>
                                     </div>
                                 </td>
                                 <td>

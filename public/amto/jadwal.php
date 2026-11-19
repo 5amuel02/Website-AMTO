@@ -62,7 +62,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage_sched) {
             $ev->timemodified = time();
             $DB->insert_record('event', $ev);
 
-            $notice_msg = "Jadwal Pelatihan <strong>{$rec->batch_code} – {$rec->program_name}</strong> berhasil ditambahkan dan disinkronkan ke Kalender Moodle.";
+            // [SEC-FIX-06] APP-01 Output encoding with s() to prevent Cross-Site Scripting (XSS)
+            $safe_batch = s($rec->batch_code);
+            $safe_prog  = s($rec->program_name);
+            $notice_msg = "Jadwal Pelatihan <strong>{$safe_batch} – {$safe_prog}</strong> berhasil ditambahkan dan disinkronkan ke Kalender Moodle.";
         } else {
             $notice_msg = 'Mohon isi Kode Batch dan Nama Program Pelatihan.';
             $notice_type = 'danger';
@@ -78,7 +81,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage_sched) {
             if (function_exists('amto_log_audit_event')) {
                 amto_log_audit_event('SCHEDULE_STATUS_UPDATE', 'amto_schedules', $sched_id, "status: {$old_st} -> {$new_status}", "Updated batch {$sched->batch_code} status");
             }
-            $notice_msg = "Status jadwal <strong>{$sched->batch_code}</strong> diperbarui menjadi <strong>{$new_status}</strong>.";
+            // [SEC-FIX-06] APP-01 Output encoding with s() to prevent Cross-Site Scripting (XSS)
+            $safe_batch  = s($sched->batch_code);
+            $safe_status = s($new_status);
+            $notice_msg  = "Status jadwal <strong>{$safe_batch}</strong> diperbarui menjadi <strong>{$safe_status}</strong>.";
         }
     } else if ($action === 'delete_schedule') {
         $sched_id = required_param('sched_id', PARAM_INT);

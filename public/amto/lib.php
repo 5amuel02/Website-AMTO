@@ -255,6 +255,44 @@ function amto_check_sod_approval(int $creator_userid, int $approver_userid): boo
 }
 
 /**
+ * [SEC-FIX-06] DP-01, DP-02 & SCP-07: Mask NIK KTP (16 digits) for Guest search & Management aggregate views.
+ */
+function amto_mask_nik(string $nik): string {
+    $clean = trim($nik);
+    $len = strlen($clean);
+    if ($len <= 6) {
+        return str_repeat('*', max(4, $len));
+    }
+    return substr($clean, 0, 4) . str_repeat('*', $len - 7) . substr($clean, -3);
+}
+
+/**
+ * [SEC-FIX-06] DP-01 & SCP-07: Mask Phone number for Guest search & Management aggregate views.
+ */
+function amto_mask_phone(string $phone): string {
+    $clean = trim($phone);
+    $len = strlen($clean);
+    if ($len <= 5) {
+        return str_repeat('*', max(4, $len));
+    }
+    return substr($clean, 0, 4) . str_repeat('*', $len - 6) . substr($clean, -2);
+}
+
+/**
+ * [SEC-FIX-06] DP-01 & SCP-07: Mask Email address for Guest status check.
+ */
+function amto_mask_email(string $email): string {
+    $parts = explode('@', trim($email), 2);
+    if (count($parts) !== 2) {
+        return '***';
+    }
+    $local = $parts[0];
+    $domain = $parts[1];
+    $prefix = substr($local, 0, min(2, strlen($local)));
+    return $prefix . '***@' . $domain;
+}
+
+/**
  * Shared CSS for AMTO Registrasi & Jadwal pages matching tatcwebreact.
  */
 function amto_render_shared_styles(): string {
