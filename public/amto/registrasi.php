@@ -14,6 +14,9 @@ $PAGE->set_title('TATC Portal – Data & Verifikasi Registrasi Peserta AMTO');
 $PAGE->set_heading('Data & Verifikasi Registrasi Peserta');
 
 $role = amto_current_role();
+$rbac_role = amto_current_rbac_role();
+$can_verify_reg = in_array($rbac_role, ['admin', 'trainingmanager', 'certofficer'], true);
+$is_audit_readonly = in_array($rbac_role, ['qa', 'management', 'adminit'], true);
 $notice_msg = '';
 $notice_type = 'success';
 
@@ -141,6 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
         $record->doc_pendukung = $doc_pendukung;
         $record->status = 'pending';
         $record->admin_notes = 'Menunggu verifikasi berkas prasyarat oleh Admin / Training Manager.';
+        $record->created_by = (isloggedin() && !isguestuser()) ? (int)$USER->id : 0;
         $record->verified_by = 0;
         $record->timecreated = time();
         $record->timemodified = time();
@@ -156,8 +160,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
     }
 }
 
-// 2. Handle Admin Approval / Rejection / Deletion
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin' && in_array($action, ['approve', 'reject', 'delete'], true)) {
+// 2. Handle Admin Approval / Rejection / Soft-Delete (Void) with RBAC & SoD enforcement
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_verify_reg && in_array($action, ['approve', 'reject', 'delete'], true)) {
     // [SEC-FIX-02] APP-01 CSRF Protection on critical state-changing actions
     require_sesskey();
 
@@ -167,11 +171,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin' && in_array($acti
 
     if ($reg) {
         if ($action === 'delete') {
-            $DB->delete_records('amto_registrations', ['id' => $regid]);
-            $msg = "Data pendaftaran {$reg->registration_no} ({$reg->fullname}) berhasil dihapus.";
+            // [SEC-FIX-04] SEC-05 & Bab 3/7 Form Kesepakatan RBAC: No Hard Delete on transaction records; use Soft Delete / Void
+            $reg->status = 'void';
+            $void_reason = $notes !== '' ? $notes : 'Dibatalkan (Void) oleh pejabat berwenang dengan jejak audit tetap tersimpan.';
+            $reg->admin_notes = '[VOID oleh ' . fullname($USER) . ' pada ' . date('Y-m-d H:i') . '] ' . $void_reason;
+            $reg->verified_by = $USER->id;
+            $reg->timemodified = time();
+            $DB->update_record('amto_registrations', $reg);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('REGISTRATION_VOID', 'amto_registrations', $regid, 'status=void', $reg->admin_notes);
+            }
+            $msg = "Data pendaftaran {$reg->registration_no} ({$reg->fullname}) telah ditandai VOID (Soft-Delete SEC-05) tanpa menghapus jejak audit.";
             header('Location: /amto/registrasi.php?admin_msg=' . urlencode($msg));
             exit;
         } else if ($action === 'approve') {
+            // [SEC-FIX-04] SEC-03 Segregation of Duties (SoD): Prevent self-approval if staff created the record manually
+            if (!amto_check_sod_approval((int)($reg->created_by ?? 0), (int)$USER->id)) {
+                if (function_exists('amto_log_audit_event')) {
+                    amto_log_audit_event('SOD_VIOLATION_BLOCKED', 'amto_registrations', $regid, 'Self-Approval Blocked', 'User attempted to approve registration created by themselves');
+                }
+                $notice_msg = 'Pelanggaran Segregation of Duties (SEC-03): Akun yang menginput pendaftaran manual tidak boleh menyetujui (Self-Approve) transaksi yang dibuatnya sendiri. Mohon gunakan akun verifikator independen.';
+                $notice_type = 'danger';
+            } else {
             $existing = $DB->get_record('user', [
                 'username' => $reg->username,
                 'mnethostid' => $CFG->mnet_localhost_id,
@@ -252,6 +273,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin' && in_array($acti
             $msg = "Pendaftaran {$reg->registration_no} ({$reg->fullname}) telah DISETUJUI. Akun LMS (username: {$reg->username}) sudah aktif dan siap digunakan login!";
             header('Location: /amto/registrasi.php?admin_msg=' . urlencode($msg));
             exit;
+            }
         } else {
             $reg->status = 'rejected';
             $reg->admin_notes = $notes !== '' ? $notes : 'Berkas prasyarat belum sesuai/kurang jelas. Mohon unggah ulang dokumen yang valid.';
@@ -520,6 +542,8 @@ echo amto_render_shared_styles();
                                         <span class="tatc-badge tatc-badge-approved">Disetujui &amp; Aktif</span>
                                     <?php elseif ($r->status === 'rejected'): ?>
                                         <span class="tatc-badge tatc-badge-rejected">Perlu Revisi / Ditolak</span>
+                                    <?php elseif ($r->status === 'void'): ?>
+                                        <span class="tatc-badge tatc-badge-rejected" style="background:#e2e8f0; color:#475569;">VOID (Soft-Deleted)</span>
                                     <?php else: ?>
                                         <span class="tatc-badge tatc-badge-pending">Menunggu Verifikasi</span>
                                     <?php endif; ?>
@@ -531,8 +555,11 @@ echo amto_render_shared_styles();
                                 </td>
                                 <?php if ($role === 'admin'): ?>
                                 <td>
+                                    <?php if ($is_audit_readonly): ?>
+                                        <span class="tatc-doc-pill" title="SCP-06 / SCP-08: Role Anda bersifat Read-Only Audit / Teknis">🔍 Read-Only (<?php echo s(strtoupper($rbac_role)); ?>)</span>
+                                    <?php else: ?>
                                     <div class="d-flex flex-wrap gap-1">
-                                        <?php if ($r->status !== 'approved'): ?>
+                                        <?php if ($r->status !== 'approved' && $r->status !== 'void'): ?>
                                         <form method="post" action="/amto/registrasi.php" style="display:inline;">
                                             <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                             <input type="hidden" name="action" value="approve">
@@ -542,7 +569,7 @@ echo amto_render_shared_styles();
                                             </button>
                                         </form>
                                         <?php endif; ?>
-                                        <?php if ($r->status !== 'rejected'): ?>
+                                        <?php if ($r->status !== 'rejected' && $r->status !== 'void'): ?>
                                         <form method="post" action="/amto/registrasi.php" style="display:inline;">
                                             <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                             <input type="hidden" name="action" value="reject">
@@ -552,15 +579,18 @@ echo amto_render_shared_styles();
                                             </button>
                                         </form>
                                         <?php endif; ?>
-                                        <form method="post" action="/amto/registrasi.php" style="display:inline;" onsubmit="return confirm('Hapus data pendaftaran ini?');">
+                                        <?php if ($r->status !== 'void'): ?>
+                                        <form method="post" action="/amto/registrasi.php" style="display:inline;" onsubmit="return confirm('Tandai pendaftaran ini sebagai VOID (Soft-Delete sesuai SEC-05)?');">
                                             <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                             <input type="hidden" name="action" value="delete">
                                             <input type="hidden" name="regid" value="<?php echo $r->id; ?>">
                                             <button type="submit" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px;">
-                                                Hapus
+                                                Void
                                             </button>
                                         </form>
+                                        <?php endif; ?>
                                     </div>
+                                    <?php endif; ?>
                                 </td>
                                 <?php else: ?>
                                 <td>

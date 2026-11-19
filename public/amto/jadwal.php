@@ -12,13 +12,15 @@ $PAGE->set_title('TATC Portal – Program & Jadwal Pelatihan AMTO');
 $PAGE->set_heading('Program & Jadwal Pelatihan AMTO');
 
 $role = amto_current_role();
+$rbac_role = amto_current_rbac_role();
+$can_manage_sched = in_array($rbac_role, ['admin', 'trainingmanager'], true);
 $action = optional_param('action', '', PARAM_ALPHANUMEXT);
 $cat_filter = optional_param('cat', 'all', PARAM_TEXT);
 $notice_msg = '';
 $notice_type = 'success';
 
-// 1. Handle Admin Actions: Add Schedule / Update Status / Delete Schedule
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin') {
+// 1. Handle Admin Actions: Add Schedule / Update Status / Soft-Delete (Void) Schedule
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage_sched) {
     // [SEC-FIX-02] APP-01 CSRF Protection via Moodle sesskey validation
     require_sesskey();
 
@@ -73,8 +75,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin') {
         }
     } else if ($action === 'delete_schedule') {
         $sched_id = required_param('sched_id', PARAM_INT);
-        $DB->delete_records('amto_schedules', ['id' => $sched_id]);
-        $notice_msg = 'Jadwal pelatihan berhasil dihapus.';
+        $sched = $DB->get_record('amto_schedules', ['id' => $sched_id]);
+        if ($sched) {
+            // [SEC-FIX-04] SEC-05 Soft-Delete / Void instead of Hard Delete
+            $sched->status = 'Voided';
+            $DB->update_record('amto_schedules', $sched);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('SCHEDULE_VOID', 'amto_schedules', $sched_id, 'status=Voided', 'Schedule voided by ' . fullname($USER));
+            }
+        }
+        $notice_msg = 'Jadwal pelatihan telah ditandai VOID (Soft-Delete SEC-05) tanpa menghapus jejak histori.';
         $notice_type = 'warning';
     }
 }

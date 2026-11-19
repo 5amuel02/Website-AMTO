@@ -41,6 +41,7 @@ CREATE TABLE `mdl_amto_registrations` (
   `doc_pendukung` varchar(255) DEFAULT '',
   `status` varchar(30) NOT NULL DEFAULT 'pending',
   `admin_notes` text DEFAULT NULL,
+  `created_by` bigint(10) NOT NULL DEFAULT 0,
   `verified_by` bigint(10) NOT NULL DEFAULT 0,
   `timecreated` bigint(10) NOT NULL DEFAULT 0,
   `timemodified` bigint(10) NOT NULL DEFAULT 0,

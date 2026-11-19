@@ -13,7 +13,8 @@ $PAGE->set_title('TATC Portal – LMS Repository & Modul Materi AMTO');
 $PAGE->set_heading('LMS Repository & Modul Materi Pelatihan');
 
 $role = amto_current_role();
-$can_manage = in_array($role, ['admin', 'instructor'], true);
+$rbac_role = amto_current_rbac_role();
+$can_manage = in_array($rbac_role, ['admin', 'trainingmanager', 'instructor', 'qa'], true);
 
 $action = optional_param('action', '', PARAM_ALPHANUMEXT);
 $cat_filter = optional_param('cat', 'all', PARAM_TEXT);
@@ -125,8 +126,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage) {
         $mod_id = required_param('mod_id', PARAM_INT);
         $mod = $DB->get_record('amto_repository', ['id' => $mod_id]);
         if ($mod) {
-            $DB->delete_records('amto_repository', ['id' => $mod_id]);
-            $m = "Modul [{$mod->module_code}] {$mod->title} berhasil dihapus dari Repository.";
+            // [SEC-FIX-04] SEC-05 Soft-Delete / Void instead of Hard Delete
+            $mod->status = 'Voided';
+            $DB->update_record('amto_repository', $mod);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('REPO_MODULE_VOID', 'amto_repository', $mod_id, 'status=Voided', "Module [{$mod->module_code}] voided by " . fullname($USER));
+            }
+            $m = "Modul [{$mod->module_code}] {$mod->title} telah ditandai VOID (Soft-Delete SEC-05).";
             header('Location: /amto/repository.php?msg=' . urlencode($m));
             exit;
         }
