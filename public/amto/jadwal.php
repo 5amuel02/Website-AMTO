@@ -19,6 +19,9 @@ $notice_type = 'success';
 
 // 1. Handle Admin Actions: Add Schedule / Update Status / Delete Schedule
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin') {
+    // [SEC-FIX-02] APP-01 CSRF Protection via Moodle sesskey validation
+    require_sesskey();
+
     if ($action === 'add_schedule') {
         $rec = new stdClass();
         $rec->batch_code = trim(optional_param('batch_code', '', PARAM_TEXT));
@@ -190,6 +193,7 @@ echo amto_render_shared_styles();
             </div>
         </div>
         <form method="post" action="/amto/jadwal.php">
+            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
             <input type="hidden" name="action" value="add_schedule">
             <div class="tatc-form-grid mb-3">
                 <div>
@@ -340,6 +344,7 @@ echo amto_render_shared_styles();
                                             Lihat Pendaftar (<?php echo $reg_count; ?>)
                                         </a>
                                         <form method="post" action="/amto/jadwal.php" style="display:inline;" onsubmit="return confirm('Hapus jadwal batch ini?');">
+                                            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                             <input type="hidden" name="action" value="delete_schedule">
                                             <input type="hidden" name="sched_id" value="<?php echo $s->id; ?>">
                                             <button type="submit" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px; color:#b91c1c !important; border-color:#fecaca;">Hapus</button>

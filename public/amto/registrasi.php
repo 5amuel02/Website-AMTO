@@ -61,6 +61,9 @@ function amto_save_uploaded_doc(string $field, string $regno): string {
 
 // 1. Handle Registration Form Submission (Only for Guest / New Applicant or Admin Manual Input)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
+    // [SEC-FIX-02] APP-01 CSRF Protection via Moodle sesskey validation
+    require_sesskey();
+
     $fullname = trim(optional_param('fullname', '', PARAM_TEXT));
     $username = strtolower(trim(optional_param('username', '', PARAM_USERNAME)));
     $nik = trim(optional_param('nik', '', PARAM_TEXT));
@@ -137,6 +140,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
 
 // 2. Handle Admin Approval / Rejection / Deletion
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin' && in_array($action, ['approve', 'reject', 'delete'], true)) {
+    // [SEC-FIX-02] APP-01 CSRF Protection on critical state-changing actions
+    require_sesskey();
+
     $regid = required_param('regid', PARAM_INT);
     $notes = trim(optional_param('admin_notes', '', PARAM_TEXT));
     $reg = $DB->get_record('amto_registrations', ['id' => $regid]);
@@ -506,6 +512,7 @@ echo amto_render_shared_styles();
                                     <div class="d-flex flex-wrap gap-1">
                                         <?php if ($r->status !== 'approved'): ?>
                                         <form method="post" action="/amto/registrasi.php" style="display:inline;">
+                                            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                             <input type="hidden" name="action" value="approve">
                                             <input type="hidden" name="regid" value="<?php echo $r->id; ?>">
                                             <button type="submit" class="tatc-btn-red" style="padding:6px 12px; font-size:12px;">
@@ -515,6 +522,7 @@ echo amto_render_shared_styles();
                                         <?php endif; ?>
                                         <?php if ($r->status !== 'rejected'): ?>
                                         <form method="post" action="/amto/registrasi.php" style="display:inline;">
+                                            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                             <input type="hidden" name="action" value="reject">
                                             <input type="hidden" name="regid" value="<?php echo $r->id; ?>">
                                             <button type="submit" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px; color:#b91c1c !important; border-color:#fecaca;">
@@ -523,6 +531,7 @@ echo amto_render_shared_styles();
                                         </form>
                                         <?php endif; ?>
                                         <form method="post" action="/amto/registrasi.php" style="display:inline;" onsubmit="return confirm('Hapus data pendaftaran ini?');">
+                                            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                             <input type="hidden" name="action" value="delete">
                                             <input type="hidden" name="regid" value="<?php echo $r->id; ?>">
                                             <button type="submit" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px;">
@@ -569,6 +578,7 @@ echo amto_render_shared_styles();
         </div>
 
         <form method="post" action="/amto/registrasi.php" enctype="multipart/form-data">
+            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
             <input type="hidden" name="action" value="register">
 
             <div class="tatc-form-grid mb-3">

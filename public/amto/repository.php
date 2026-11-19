@@ -54,6 +54,9 @@ function amto_save_repo_file(string $modcode): array {
 
 // Handle Upload / Delete Actions (for Admin & Instructor only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage) {
+    // [SEC-FIX-02] APP-01 CSRF Protection via Moodle sesskey validation
+    require_sesskey();
+
     if ($action === 'upload_module') {
         $module_code = strtoupper(trim(optional_param('module_code', '', PARAM_TEXT)));
         $title = trim(optional_param('title', '', PARAM_TEXT));
@@ -234,6 +237,7 @@ echo amto_render_shared_styles();
         </div>
 
         <form method="post" action="/amto/repository.php" enctype="multipart/form-data">
+            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
             <input type="hidden" name="action" value="upload_module">
 
             <div class="tatc-form-grid mb-3">
@@ -382,6 +386,7 @@ echo amto_render_shared_styles();
                                         <?php endif; ?>
                                         <?php if ($can_manage): ?>
                                             <form method="post" action="/amto/repository.php" style="display:inline;" onsubmit="return confirm('Hapus modul ini dari Repository?');">
+                                                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                                 <input type="hidden" name="action" value="delete_module">
                                                 <input type="hidden" name="mod_id" value="<?php echo $m->id; ?>">
                                                 <button type="submit" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px; color:#b91c1c !important; border-color:#fecaca;">
