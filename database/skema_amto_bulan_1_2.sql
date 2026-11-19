@@ -108,6 +108,7 @@ CREATE TABLE `mdl_amto_repository` (
   `file_type` varchar(60) NOT NULL DEFAULT 'PDF Training Manual',
   `file_path` varchar(255) NOT NULL DEFAULT '',
   `file_size` varchar(40) NOT NULL DEFAULT '',
+  `file_hash` varchar(64) NOT NULL DEFAULT '',
   `doc_version` varchar(50) NOT NULL DEFAULT 'Rev. 01 - 2026',
   `description` text DEFAULT NULL,
   `uploaded_by` bigint(10) NOT NULL DEFAULT 0,

@@ -33,27 +33,45 @@ if ($admin_msg !== '') {
     $notice_type = 'success';
 }
 
-// Helper to handle secure file upload (PDF/JPG/PNG max 5MB per Security Agreement)
+// Helper to handle secure file upload (PDF/JPG/PNG max 5MB per Security Agreement DP-06 & APP-06)
 function amto_save_uploaded_doc(string $field, string $regno): string {
     if (empty($_FILES[$field]['name']) || $_FILES[$field]['error'] !== UPLOAD_ERR_OK) {
         return '';
     }
     $allowed_ext = ['pdf', 'jpg', 'jpeg', 'png'];
-    $orig_name = $_FILES[$field]['name'];
+    $allowed_mimes = ['application/pdf', 'image/jpeg', 'image/png'];
+    $orig_name = basename((string)$_FILES[$field]['name']);
     $ext = strtolower(pathinfo($orig_name, PATHINFO_EXTENSION));
     if (!in_array($ext, $allowed_ext, true)) {
         return '';
     }
-    if ($_FILES[$field]['size'] > 5 * 1024 * 1024) {
+    if ($_FILES[$field]['size'] <= 0 || $_FILES[$field]['size'] > 5 * 1024 * 1024) {
         return '';
+    }
+    // [SEC-FIX-03] DP-06 & APP-06: Validate actual file magic bytes / MIME type using finfo
+    $tmp_path = $_FILES[$field]['tmp_name'];
+    if (!is_uploaded_file($tmp_path)) {
+        return '';
+    }
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $real_mime = $finfo ? finfo_file($finfo, $tmp_path) : '';
+        if ($finfo) {
+            finfo_close($finfo);
+        }
+        if (!in_array($real_mime, $allowed_mimes, true)) {
+            return '';
+        }
     }
     $upload_dir = __DIR__ . '/uploads';
     if (!is_dir($upload_dir)) {
-        mkdir($upload_dir, 0775, true);
+        mkdir($upload_dir, 0750, true);
     }
-    $safe_name = strtolower($regno . '_' . $field . '_' . time() . '.' . $ext);
+    $clean_regno = preg_replace('/[^a-zA-Z0-9_-]/', '', strtolower($regno));
+    $clean_field = preg_replace('/[^a-zA-Z0-9_-]/', '', strtolower($field));
+    $safe_name = $clean_regno . '_' . $clean_field . '_' . time() . '.' . $ext;
     $dest = $upload_dir . '/' . $safe_name;
-    if (move_uploaded_file($_FILES[$field]['tmp_name'], $dest)) {
+    if (move_uploaded_file($tmp_path, $dest)) {
         return '/amto/uploads/' . $safe_name;
     }
     return '';
@@ -480,17 +498,21 @@ echo amto_render_shared_styles();
                                     <div style="font-weight:600; color:#0f172a; max-width:250px;"><?php echo s($r->program_name); ?></div>
                                 </td>
                                 <td>
-                                    <?php if (!empty($r->doc_ktp)): ?>
-                                        <a href="<?php echo s($r->doc_ktp); ?>" target="_blank" class="tatc-doc-pill">KTP</a>
-                                    <?php endif; ?>
-                                    <?php if (!empty($r->doc_ijazah)): ?>
-                                        <a href="<?php echo s($r->doc_ijazah); ?>" target="_blank" class="tatc-doc-pill">Ijazah</a>
-                                    <?php endif; ?>
-                                    <?php if (!empty($r->doc_pendukung)): ?>
-                                        <a href="<?php echo s($r->doc_pendukung); ?>" target="_blank" class="tatc-doc-pill">Surat/Foto</a>
-                                    <?php endif; ?>
-                                    <?php if (empty($r->doc_ktp) && empty($r->doc_ijazah) && empty($r->doc_pendukung)): ?>
-                                        <span style="font-size:12px; color:#94a3b8;">Belum unggah file</span>
+                                    <?php if ($role !== 'guest' && isloggedin() && !isguestuser()): ?>
+                                        <?php if (!empty($r->doc_ktp)): ?>
+                                            <a href="/amto/download.php?type=reg&amp;id=<?php echo (int)$r->id; ?>&amp;doc=ktp" target="_blank" class="tatc-doc-pill">KTP</a>
+                                        <?php endif; ?>
+                                        <?php if (!empty($r->doc_ijazah)): ?>
+                                            <a href="/amto/download.php?type=reg&amp;id=<?php echo (int)$r->id; ?>&amp;doc=ijazah" target="_blank" class="tatc-doc-pill">Ijazah</a>
+                                        <?php endif; ?>
+                                        <?php if (!empty($r->doc_pendukung)): ?>
+                                            <a href="/amto/download.php?type=reg&amp;id=<?php echo (int)$r->id; ?>&amp;doc=pendukung" target="_blank" class="tatc-doc-pill">Surat/Foto</a>
+                                        <?php endif; ?>
+                                        <?php if (empty($r->doc_ktp) && empty($r->doc_ijazah) && empty($r->doc_pendukung)): ?>
+                                            <span style="font-size:12px; color:#94a3b8;">Belum unggah file</span>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <span class="tatc-doc-pill" title="DP-07: Login untuk mengakses dokumen terproteksi">🔒 Terlindungi (DP-07)</span>
                                     <?php endif; ?>
                                 </td>
                                 <td>

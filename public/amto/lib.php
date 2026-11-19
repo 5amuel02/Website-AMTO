@@ -70,6 +70,7 @@ function amto_ensure_tables(): void {
             file_type VARCHAR(60) NOT NULL DEFAULT 'PDF Training Manual',
             file_path VARCHAR(255) NOT NULL DEFAULT '',
             file_size VARCHAR(40) NOT NULL DEFAULT '',
+            file_hash VARCHAR(64) NOT NULL DEFAULT '',
             doc_version VARCHAR(50) NOT NULL DEFAULT 'Rev. 01 - 2026',
             description TEXT DEFAULT NULL,
             uploaded_by BIGINT(10) NOT NULL DEFAULT 0,
@@ -79,6 +80,12 @@ function amto_ensure_tables(): void {
             PRIMARY KEY (id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
         $DB->execute($sql);
+    } else {
+        // [SEC-FIX-03] DP-09 Ensure SHA-256 file_hash column exists for document integrity
+        $cols = $DB->get_columns('amto_repository');
+        if (!isset($cols['file_hash'])) {
+            $DB->execute("ALTER TABLE {amto_repository} ADD COLUMN file_hash VARCHAR(64) NOT NULL DEFAULT '' AFTER file_size");
+        }
     }
 }
 
