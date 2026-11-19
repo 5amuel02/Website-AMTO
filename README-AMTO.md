@@ -1,42 +1,61 @@
-# Website AMTO – Integrated Training, Learning & Certification Management System
+# Website AMTO – TATC Integrated Training, Learning & Certification System
 
-Portal **LMS, Pelatihan, Evaluasi Kompetensi, Practical Logbook, dan Sertifikasi** untuk **Aircraft Maintenance Training Organization (AMTO)** berbasis **Moodle 5.3.1** (PHP 8.3 & MariaDB).
-
----
-
-## 👥 Pembagian Tim Pengembang
-1. **Full Stack Developer (Frontend, Backend & Database):**
-   - Kustomisasi UI/UX Portal AMTO, Split-Screen Login Page, Role-Based Navigation & Dashboard (*Trainee* vs *Instructor* vs *Admin*), modul kursus, dan struktur database.
-2. **Network & Infrastructure (Admin IT):**
-   - Konfigurasi jaringan lokal/VPN (Tailscale), Web Server Apache, port & firewall, SSL/HTTPS, serta otomatisasi backup & restore sesuai SLA/RPO/RTO.
-3. **Security & Compliance (Tech Lead / Security):**
-   - Implementasi **8 Role RBAC (`R01`–`R08`)**, *Segregation of Duties (SoD)*, kebijakan autentikasi (`IAM-01` s.d. `IAM-11`: Password Policy, Brute-Force Lockout, Session Timeout, MFA), Audit Trail (`LOG-01` s.d. `LOG-09`), dan pengujian **15 Skenario Security UAT (`UAT-SEC-01` s.d. `UAT-SEC-15`)**.
+Repositori resmi **Website AMTO (Aircraft Maintenance Training Organization) / Telkom University Aviation Training Center (TATC)** yang menggabungkan:
+1. **Moodle 5.3.1 E-Learning LMS (`Port 8080`)** — Ruang kelas digital, modul **Registrasi & Verifikasi Peserta AMTO**, **Jadwal & Batch Pelatihan**, serta **LMS Repository Modul CASR Part 147**.
+2. **TATC Web Portal React (`tatcwebreact/` – `Port 5173` & API `Port 3001`)** — Portal depan (*Landing Page*, Berita, Mitra, Portal Peserta/Instruktur, BAP, dan Admin Console) yang terisolasi rapi di dalam sub-folder `tatcwebreact/` tanpa mengganggu sistem LMS utama.
 
 ---
 
-## 📂 Struktur Repository
-- `public/amto/index.html` — Showcase **UI/UX Prototype Interaktif (6 Layar)** sesuai dokumen spesifikasi AMTO (bisa diakses di `/amto/`).
-- `public/theme/boost/templates/core/` — Template kustom **Split-Screen Login Page AMTO** (`login_layout.mustache`, `login_panel.mustache`, `loginform.mustache`).
-- `public/theme/boost/classes/output/core_renderer.php` — Pengaturan tampilan saklar *Edit mode* berdasarkan role aktif.
-- `public/lib/classes/navigation/` — Pemisahan menu bar atas otomatis untuk **Peserta (`student`)**, **Pengajar (`instructor`)**, dan **Admin (`admin`)**.
-- `public/blocks/myoverview/classes/output/main.php` — Pemisahan tampilan *Dashboard Course Overview* untuk Peserta, Pengajar, dan Admin.
-- `database/moodle_amto.sql` — Backup penuh database MariaDB `moodle` (termasuk konfigurasi tema, SCSS, dan akun awal).
-- `scripts/` — Script otomatisasi penerapan tema, pemisahan role, dan sinkronisasi database.
-- `config.php` — Konfigurasi koneksi database & dukungan akses multi-IP (LAN / Wi-Fi / Tailscale) serta fungsi helper `amto_get_effective_role()`.
+## Struktur Direktori Proyek (Modular & Tidak Saling Mengganggu)
+
+```text
+Website-AMTO/ (C:\moodle\server\moodle)
+├── public/                                       # Web Root Moodle LMS (Port 8080)
+│   ├── amto/                                     # Modul Khusus AMTO Bulan 1-2 di dalam LMS:
+│   │   ├── registrasi.php                        # 1. Modul Registrasi & Verifikasi Berkas Peserta
+│   │   ├── jadwal.php                            # 2. Modul Program, Batch & Jadwal Pelatihan
+│   │   ├── repository.php                        # 3. Modul LMS Repository & Materi CASR Part 147
+│   │   ├── lib.php                               # Skema Tabel Otomatis & Desain UI tatcwebreact
+│   │   └── assets/                               # Logo Resmi TATC (tatc.png & Logo2.png)
+│   └── theme/boost/templates/                    # Custom Navbar & Split-Screen Login TATC Red
+│
+├── tatcwebreact/                                 # Sub-folder Terpisah: Portal Web React + Next.js API
+│   ├── src/                                      # Frontend React (Vite - Port 5173)
+│   ├── backend/                                  # Backend Next.js API + Prisma ORM (Port 3001)
+│   └── package.json
+│
+├── database/                                     # Backup Database MariaDB (Port 3307)
+│   ├── moodle_amto.sql                           # Database Utama Moodle LMS (moodle)
+│   ├── skema_amto_bulan_1_2.sql                  # Skema Khusus 3 Tabel Baru AMTO (mdl_amto_*)
+│   └── tatc_web.sql                              # Database Portal React (tatc_web - 26 Tabel Prisma)
+│
+├── Dokumentasi_Rancangan_dan_Testing_AMTO/       # Diagram Arsitektur, ERD Database & Bukti Testing
+│   ├── Konsep_Integrasi_Portal_TATC_dan_LMS_AMTO.jpg
+│   ├── Struktur_Database_Website_AMTO.jpg
+│   ├── Hasil_Testing_Database_Pendaftaran_AMTO.png
+│   └── Hasil_Testing_Database_Repository_LMS.png
+│
+└── Nyalakan_TATC_dan_LMS.bat                     # Shortcut 1-Klik Menyalakan Seluruh Server
+```
 
 ---
 
-## 🚀 Cara Menjalankan untuk Anggota Tim
+## Cara Menjalankan Sistem (Untuk Tim Full-Stack & Security)
 
-### Opsi A: Akses Langsung via Jaringan Bersama (Wi-Fi / Tailscale)
-1. Pastikan server Moodle di laptop utama sedang berjalan (`Start-Moodle.bat`).
-2. Buka browser dan akses `http://<IP-Laptop-Server>:8080` (atau `http://localhost:8080` di laptop server).
-3. Login menggunakan akun Admin:
-   - **Username:** `admin`
-   - **Password:** `Admin123@2`
+### 1. Menyalakan Seluruh Server Sekaligus (1-Klik)
+Klik 2x file **`Nyalakan_TATC_dan_LMS.bat`**, atau jalankan lewat PowerShell:
+```powershell
+Start-Process "C:\moodle\server\mysql\bin\mysqld.exe" -ArgumentList "--defaults-file=C:\moodle\server\mysql\bin\my.ini","--standalone","--innodb-buffer-pool-load-at-startup=0","--innodb-buffer-pool-dump-at-shutdown=0" -WindowStyle Hidden
+Start-Process "C:\moodle\server\apache\bin\httpd.exe" -WindowStyle Hidden
+cd "C:\moodle\server\moodle\tatcwebreact"
+npm run install:all
+npm run dev
+```
 
-### Opsi B: Clone & Pasang di Laptop Masing-Masing
-1. Ekstrak `MoodleWindowsInstaller-latest-503.zip` ke `C:\moodle` dan pastikan menggunakan **PHP 8.3**.
-2. Clone repository ini lalu salin seluruh isi folder ke dalam `C:\moodle\server\moodle\`.
-3. Import file database `database/moodle_amto.sql` ke MariaDB (port `3307`, database `moodle`).
-4. Jalankan `C:\moodle\Start-Moodle.bat` dan buka `http://localhost:8080`.
+### 2. Daftar URL & Akun Login Pengujian
+- **Moodle LMS (`http://localhost:8080/my/`)**
+  - **Username:** `admin` | **Password:** `Admin123@2`
+- **TATC Web Portal React (`http://localhost:5173/login`)**
+  - **Super Admin:** `admin@tatc.id` | **Password:** `Admin123@2`
+  - **Instruktur:** `instruktur@tatc.id` | **Password:** `Admin123@2`
+  - **Peserta:** `peserta@tatc.id` | **Password:** `Admin123@2`

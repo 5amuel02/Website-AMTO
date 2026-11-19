@@ -1,0 +1,7 @@
+
+# TATC Web React build & dependency folders
+tatcwebreact/node_modules/
+tatcwebreact/backend/node_modules/
+tatcwebreact/backend/.next/
+tatcwebreact/dist/
+
