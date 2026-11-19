@@ -2,9 +2,35 @@
 require_once(__DIR__ . '/../config.php');
 require_once(__DIR__ . '/lib.php');
 
+// [SEC-FIX-01] APP-02, SEC-04 (Deny by Default) & DP-01:
+// Wajib autentikasi dan hanya mengizinkan role Admin / QA / Training Manager.
+require_login();
+
+header('X-Frame-Options: SAMEORIGIN');
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+$current_role = amto_current_role();
+if (!in_array($current_role, ['admin', 'adminit', 'qa', 'trainingmanager'], true)) {
+    http_response_code(403);
+    throw new moodle_exception('nopermissions', 'error', '', 'Akses Ditolak (SEC-04 Deny by Default): Halaman diagnostik database hanya untuk Administrator IT & QA.');
+}
+
 global $DB;
 $regs = $DB->get_records('amto_registrations', null, 'id DESC');
 $latest = reset($regs);
+
+/**
+ * Helper untuk masking NIK (DP-01 & DP-02 Data Minimization on diagnostic view).
+ */
+function amto_mask_diag_nik(string $nik): string {
+    $clean = trim($nik);
+    if (strlen($clean) <= 8) {
+        return str_repeat('*', strlen($clean));
+    }
+    return substr($clean, 0, 4) . str_repeat('*', strlen($clean) - 8) . substr($clean, -4);
+}
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -195,14 +221,14 @@ $latest = reset($regs);
                     <div class="kv-row"><div class="kv-key">registration_no</div><div class="kv-val"><?php echo s($latest->registration_no); ?></div></div>
                     <div class="kv-row"><div class="kv-key">username</div><div class="kv-val"><?php echo s($latest->username); ?></div></div>
                     <div class="kv-row"><div class="kv-key">fullname</div><div class="kv-val"><?php echo s($latest->fullname); ?></div></div>
-                    <div class="kv-row"><div class="kv-key">nik</div><div class="kv-val"><?php echo s($latest->nik); ?></div></div>
+                    <div class="kv-row"><div class="kv-key">nik</div><div class="kv-val"><?php echo s(amto_mask_diag_nik($latest->nik)); ?></div></div>
                     <div class="kv-row"><div class="kv-key">email</div><div class="kv-val"><?php echo s($latest->email); ?></div></div>
                     <div class="kv-row"><div class="kv-key">phone</div><div class="kv-val"><?php echo s($latest->phone); ?></div></div>
                     <div class="kv-row"><div class="kv-key">organization</div><div class="kv-val"><?php echo s($latest->organization); ?></div></div>
                     <div class="kv-row"><div class="kv-key">amel_no</div><div class="kv-val"><?php echo s($latest->amel_no); ?></div></div>
                     <div class="kv-row"><div class="kv-key">schedule_id (FK)</div><div class="kv-val"><?php echo (int)$latest->schedule_id; ?></div></div>
                     <div class="kv-row"><div class="kv-key">program_name</div><div class="kv-val"><?php echo s($latest->program_name); ?></div></div>
-                    <div class="kv-row"><div class="kv-key">password_hash</div><div class="kv-val"><?php echo s(substr($latest->password_hash, 0, 38)) . '... (Bcrypt IAM-03)'; ?></div></div>
+                    <div class="kv-row"><div class="kv-key">password_hash</div><div class="kv-val">[REDACTED &bull; BCRYPT HASH PROTECTED (IAM-03)]</div></div>
                     <div class="kv-row"><div class="kv-key">doc_ktp</div><div class="kv-val"><?php echo s($latest->doc_ktp); ?></div></div>
                     <div class="kv-row"><div class="kv-key">doc_ijazah</div><div class="kv-val"><?php echo s($latest->doc_ijazah); ?></div></div>
                     <div class="kv-row"><div class="kv-key">doc_pendukung</div><div class="kv-val"><?php echo s($latest->doc_pendukung); ?></div></div>
@@ -246,7 +272,7 @@ $latest = reset($regs);
                         <td>
                             <strong><?php echo s($latest->fullname); ?></strong><br>
                             <span style="font-size:11px; color:#64748b;">User: <code><?php echo s($latest->username); ?></code></span><br>
-                            <span style="font-size:11px; color:#64748b;">NIK: <?php echo s($latest->nik); ?></span>
+                            <span style="font-size:11px; color:#64748b;">NIK: <?php echo s(amto_mask_diag_nik($latest->nik)); ?></span>
                         </td>
                         <td>
                             <strong><?php echo s($latest->organization); ?></strong><br>
