@@ -26,7 +26,8 @@ if (!empty($_SERVER['HTTP_HOST']) && preg_match('/^[a-zA-Z0-9.\-]+(:[0-9]{1,5})?
     $CFG->wwwroot = 'http://localhost:8080';
 }
 
-$CFG->dataroot  = getenv('AMTO_DATAROOT') ?: 'C:\\moodle\\server/moodledata';
+$default_dataroot = is_dir('C:\\moodle\\server/moodledata') ? 'C:\\moodle\\server/moodledata' : 'D:/AMTO/moodledata';
+$CFG->dataroot  = getenv('AMTO_DATAROOT') ?: $default_dataroot;
 $CFG->admin     = 'admin';
 
 // [SEC-FIX-07] Hardened directory permissions (0750 instead of world-writable 0777) & session cookie security
