@@ -73,4 +73,36 @@ foreach ($amto_roles as $r) {
     }
 }
 
-echo "=== 8 Role RBAC Provisioning Completed ===\n";
+echo "\n=== Applying IAM, Session, Lockout & SSRF Hardening Policies (IAM-01..IAM-11, APP-01..APP-08) ===\n";
+
+// IAM-03 Password Policy
+set_config('passwordpolicy', 1);
+set_config('minpasswordlength', 8);
+set_config('minpassworddigits', 1);
+set_config('minpasswordlower', 1);
+set_config('minpasswordupper', 1);
+set_config('minpasswordnonalphanum', 1);
+
+// IAM-05 Password Reset Token Expiration (30 minutes)
+set_config('pwresettime', 1800);
+
+// IAM-06 Brute-Force Account Lockout (5 attempts within 15 mins -> 30 mins lockout)
+set_config('lockoutthreshold', 5);
+set_config('lockoutwindow', 900);
+set_config('lockoutduration', 1800);
+
+// IAM-07 Session Idle Timeout (30 minutes) & Cookie Hardening
+set_config('sessiontimeout', 1800);
+set_config('cookiehttponly', 1);
+
+// SCP-01 Profile & Privacy Hardening
+set_config('forceloginforprofiles', 1);
+set_config('profilesforenrolledusersonly', 1);
+set_config('cronclionly', 1);
+
+// APP-01 SSRF Prevention via Moodle cURL blocked hosts list
+$blocked_hosts = "127.0.0.0/8\n169.254.169.254\nlocalhost\n0.0.0.0/8\n::1";
+set_config('curlsecurityblockedhosts', $blocked_hosts);
+
+echo " [+] Applied IAM-03 Password Policy, IAM-05 Reset Expiry, IAM-06 Lockout, IAM-07 Session Timeout, and APP-01 SSRF Protection.\n";
+echo "=== 8 Role RBAC & Security Hardening Provisioning Completed ===\n";

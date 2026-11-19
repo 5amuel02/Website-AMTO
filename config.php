@@ -4,30 +4,42 @@ unset($CFG);
 global $CFG;
 $CFG = new stdClass();
 
-$CFG->dbtype    = 'mariadb';
+$CFG->dbtype    = getenv('AMTO_DB_TYPE') ?: 'mariadb';
 $CFG->dblibrary = 'native';
-$CFG->dbhost    = 'localhost';
-$CFG->dbname    = 'moodle';
-$CFG->dbuser    = 'root';
-$CFG->dbpass    = '';
+$CFG->dbhost    = getenv('AMTO_DB_HOST') ?: 'localhost';
+$CFG->dbname    = getenv('AMTO_DB_NAME') ?: 'moodle';
+$CFG->dbuser    = getenv('AMTO_DB_USER') ?: 'root';
+$CFG->dbpass    = getenv('AMTO_DB_PASS') !== false ? getenv('AMTO_DB_PASS') : '';
 $CFG->prefix    = 'mdl_';
 $CFG->dboptions = array (
   'dbpersist' => 0,
-  'dbport' => 3307,
+  'dbport' => (int)(getenv('AMTO_DB_PORT') ?: 3307),
   'dbsocket' => '',
   'dbcollation' => 'utf8mb4_unicode_ci',
 );
 
-if (!empty($_SERVER['HTTP_HOST'])) {
-    $CFG->wwwroot = 'http://' . $_SERVER['HTTP_HOST'];
+// [SEC-FIX-07] APP-01, APP-04 & DP-03: Validate HTTP_HOST to prevent Host Header Injection & support HTTPS
+$amto_scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
+if (!empty($_SERVER['HTTP_HOST']) && preg_match('/^[a-zA-Z0-9.\-]+(:[0-9]{1,5})?$/', $_SERVER['HTTP_HOST'])) {
+    $CFG->wwwroot = $amto_scheme . $_SERVER['HTTP_HOST'];
 } else {
     $CFG->wwwroot = 'http://localhost:8080';
 }
 
-$CFG->dataroot  = 'C:\\moodle\\server/moodledata';
+$CFG->dataroot  = getenv('AMTO_DATAROOT') ?: 'C:\\moodle\\server/moodledata';
 $CFG->admin     = 'admin';
 
-$CFG->directorypermissions = 0777;
+// [SEC-FIX-07] Hardened directory permissions (0750 instead of world-writable 0777) & session cookie security
+$CFG->directorypermissions = 0750;
+$CFG->cookiehttponly = 1;
+$CFG->cookiesecure   = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 1 : 0;
+
+if (PHP_SAPI !== 'cli' && !headers_sent()) {
+    header('X-Frame-Options: SAMEORIGIN');
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('X-Permitted-Cross-Domain-Policies: none');
+}
 
 /**
  * [SEC-FIX-04] Return granular 8-Role RBAC code (R01-R08):
