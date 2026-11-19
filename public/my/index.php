@@ -35,6 +35,12 @@
  */
 
 require_once(__DIR__ . '/../config.php');
+if (file_exists($CFG->dirroot . '/amto/lib.php')) {
+    require_once($CFG->dirroot . '/amto/lib.php');
+    if (function_exists('amto_auto_sync_from_tatc_cookie')) {
+        amto_auto_sync_from_tatc_cookie();
+    }
+}
 require_once($CFG->dirroot . '/my/lib.php');
 
 redirect_if_major_upgrade_required();
@@ -195,6 +201,12 @@ if (empty($CFG->forcedefaultmymoodle) && $PAGE->user_allowed_editing()) {
 }
 
 echo $OUTPUT->header();
+if (file_exists($CFG->dirroot . '/amto/lib.php')) {
+    require_once($CFG->dirroot . '/amto/lib.php');
+    if (function_exists('amto_render_operational_dashboard')) {
+        echo amto_render_operational_dashboard();
+    }
+}
 
 if (core_userfeedback::should_display_reminder()) {
     core_userfeedback::print_reminder_block();

@@ -39,8 +39,11 @@ function amto_get_effective_role(): string {
                 if (in_array($role->shortname, ['student', 'guest', 'user', 'frontpage'])) {
                     return 'student';
                 }
-                if (in_array($role->shortname, ['teacher', 'editingteacher', 'coursecreator'])) {
+                if (in_array($role->shortname, ['teacher', 'editingteacher', 'coursecreator', 'qa'])) {
                     return 'instructor';
+                }
+                if (in_array($role->shortname, ['manager', 'certofficer'])) {
+                    return 'admin';
                 }
             }
         }
@@ -54,10 +57,10 @@ function amto_get_effective_role(): string {
                   JOIN {role} r ON r.id = ra.roleid
                  WHERE ra.userid = ?";
         $roles = $DB->get_fieldset_sql($sql, [$USER->id]);
-        if (array_intersect($roles, ['manager', 'coursecreator'])) {
+        if (array_intersect($roles, ['manager', 'coursecreator', 'certofficer'])) {
             return 'admin';
         }
-        if (array_intersect($roles, ['editingteacher', 'teacher'])) {
+        if (array_intersect($roles, ['editingteacher', 'teacher', 'qa'])) {
             return 'instructor';
         }
     }

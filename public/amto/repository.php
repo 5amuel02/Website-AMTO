@@ -2,6 +2,7 @@
 require_once(__DIR__ . '/../config.php');
 require_once(__DIR__ . '/lib.php');
 
+amto_auto_sync_from_tatc_cookie();
 require_login();
 amto_ensure_tables();
 

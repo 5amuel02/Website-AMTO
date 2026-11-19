@@ -60,12 +60,12 @@ const PortalLayout = () => {
             </Link>
           ))}
 
-          {/* Direct Bridge to Moodle LMS & Repository */}
+          {/* Direct Bridge to Moodle LMS & Repository with Auto-SSO Sync */}
           <div style={{ padding: '0.75rem 1.5rem 0.25rem', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)', marginTop: '0.5rem' }}>
             E-Learning &amp; LMS AMTO
           </div>
           <a
-            href="http://localhost:8080/my/"
+            href={`http://localhost:8080/amto/sso.php?email=${encodeURIComponent(user.email || '')}&role=${encodeURIComponent(user.role || 'PESERTA')}&name=${encodeURIComponent(displayName)}&target=/my/`}
             style={{
               display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1.5rem',
               color: 'var(--primary-color)', background: 'rgba(220, 38, 38, 0.06)',
@@ -78,7 +78,7 @@ const PortalLayout = () => {
             Buka Dashboard LMS
           </a>
           <a
-            href="http://localhost:8080/amto/repository.php"
+            href={`http://localhost:8080/amto/sso.php?email=${encodeURIComponent(user.email || '')}&role=${encodeURIComponent(user.role || 'PESERTA')}&name=${encodeURIComponent(displayName)}&target=/amto/repository.php`}
             style={{
               display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1.5rem',
               color: 'var(--text-main)', textDecoration: 'none', fontWeight: '500'
