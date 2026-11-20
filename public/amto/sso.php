@@ -2,6 +2,52 @@
 require_once(__DIR__ . '/../config.php');
 require_once(__DIR__ . '/lib.php');
 
+/**
+ * [SEC-SSO-02] APP-01 & APP-04: Validasi ketat URL redirect SSO (Allowlist Origin & Relative Path)
+ * untuk mencegah celah Open Redirect Phishing (termasuk bypass protocol-relative //domain.com) dan Header Injection.
+ */
+function amto_sanitize_sso_redirect_target(string $raw_target, string $fallback = '/login/index.php'): string {
+    $clean = trim(str_replace(["\r", "\n", "\0"], '', $raw_target));
+    if ($clean === '') {
+        return '';
+    }
+
+    // 1. Izinkan path relatif internal yang diawali satu '/' (tolak '//' atau '/\')
+    if ($clean[0] === '/' && !preg_match('#^[/\\\\]{2}#', $clean)) {
+        return $clean;
+    }
+
+    // 2. Izinkan origin internal Portal TATC (Port 5173) & LMS Moodle (Port 8080) pada host yang sah
+    $parsed = parse_url($clean);
+    if (is_array($parsed) && !empty($parsed['scheme']) && !empty($parsed['host'])) {
+        $scheme = strtolower($parsed['scheme']);
+        $host   = strtolower($parsed['host']);
+        $port   = isset($parsed['port']) ? (int)$parsed['port'] : ($scheme === 'https' ? 443 : 80);
+
+        $current_host = !empty($_SERVER['HTTP_HOST']) ? strtolower(explode(':', $_SERVER['HTTP_HOST'])[0]) : 'localhost';
+        $allowed_hosts = array_unique(['localhost', '127.0.0.1', $current_host]);
+        $allowed_ports = [80, 443, 5173, 8080];
+
+        if (in_array($scheme, ['http', 'https'], true) &&
+            in_array($host, $allowed_hosts, true) &&
+            in_array($port, $allowed_ports, true)) {
+            return $clean;
+        }
+    }
+
+    // 3. Blokir domain eksternal yang tidak dikenal & catat ke Audit Trail
+    if (function_exists('amto_log_audit_event')) {
+        amto_log_audit_event(
+            'SSO_OPEN_REDIRECT_BLOCKED',
+            'sso',
+            0,
+            'blocked_target=' . substr($clean, 0, 180),
+            'Menolak percobaan Open Redirect menuju domain eksternal yang tidak terdaftar dalam allowlist AMTO.'
+        );
+    }
+    return $fallback;
+}
+
 $action = optional_param('action', 'login', PARAM_ALPHA);
 if ($action === 'logout') {
     unset($_SESSION['amto_last_tatc_token']);
@@ -9,9 +55,10 @@ if ($action === 'logout') {
     if (isloggedin() && !isguestuser()) {
         require_logout();
     }
-    $target = optional_param('target', '', PARAM_RAW);
-    if ($target !== '') {
-        header('Location: ' . $target);
+    $raw_target = optional_param('target', '', PARAM_RAW);
+    $safe_target = amto_sanitize_sso_redirect_target($raw_target, '/login/index.php');
+    if ($safe_target !== '') {
+        header('Location: ' . $safe_target);
         exit;
     }
     header('Content-Type: application/json');
@@ -64,9 +111,10 @@ if ($cookie_data && !empty($cookie_data['email'])) {
     exit;
 }
 
-if (empty($target) || $target[0] !== '/') {
-    $target = '/my/';
+$safe_login_target = amto_sanitize_sso_redirect_target((string)$target, '/my/');
+if ($safe_login_target === '') {
+    $safe_login_target = '/my/';
 }
 
-header('Location: ' . $target);
+header('Location: ' . $safe_login_target);
 exit;
