@@ -260,6 +260,28 @@ foreach ($test_accounts as $acc) {
     $errorcode = null;
     $auth_ok = authenticate_user_login($acc['username'], $default_pass, false, $errorcode);
     echo "     -> Auth Check ({$acc['username']} / {$default_pass}): " . ($auth_ok ? "OK (UID {$auth_ok->id})" : "FAILED (code {$errorcode})") . "\n";
+
+    // Also ensure the account exists in tatc_web.users (Portal React) with matching bcryptjs ($2a$10$) password hash
+    try {
+        $tatc_bcrypt_hash = str_replace('$2y$', '$2a$', password_hash($default_pass, PASSWORD_BCRYPT));
+        $tatc_role = 'ADMIN';
+        if ($acc['role'] === 'r01_trainee') {
+            $tatc_role = 'PESERTA';
+        } else if (in_array($acc['role'], ['r02_instructor', 'r03_assessor'], true)) {
+            $tatc_role = 'INSTRUKTUR';
+        } else if ($acc['role'] === 'r07_adminit') {
+            $tatc_role = 'SUPERADMIN';
+        }
+        $full_name = trim($acc['firstname'] . ' ' . $acc['lastname']);
+        $DB->execute(
+            "INSERT INTO tatc_web.users (email, password_hash, role, status, email_verified_at, name, failed_login_attempts, created_at, updated_at)
+             VALUES (?, ?, ?, 'ACTIVE', NOW(), ?, 0, NOW(), NOW())
+             ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), role = VALUES(role), status = 'ACTIVE', name = VALUES(name), failed_login_attempts = 0, lockout_until = NULL",
+            [$acc['email'], $tatc_bcrypt_hash, $tatc_role, $full_name]
+        );
+    } catch (Throwable $e) {
+        // Ignore if tatc_web is not present
+    }
 }
 
 echo "=== 8 Role RBAC & Official Test Accounts Provisioning Completed ===\n";
