@@ -41,6 +41,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage_sched) {
 
         if ($rec->batch_code !== '' && $rec->program_name !== '') {
             $new_sched_id = $DB->insert_record('amto_schedules', $rec);
+            if (function_exists('amto_sync_cross_db')) {
+                amto_sync_cross_db(true);
+            }
             if (function_exists('amto_log_audit_event')) {
                 amto_log_audit_event('SCHEDULE_CREATE', 'amto_schedules', (int)$new_sched_id, "batch={$rec->batch_code}", "Created training schedule {$rec->program_name} ({$rec->start_date} - {$rec->end_date})");
             }

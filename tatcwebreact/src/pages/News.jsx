@@ -42,7 +42,9 @@ function News() {
   }, [slug]);
 
   const navStyle = {
-    padding: scrolled ? '1rem 0' : '1.5rem 0',
+    height: '76px',
+    display: 'flex',
+    alignItems: 'center',
     background: 'var(--navbar-bg)',
     backdropFilter: 'blur(16px)',
     borderBottom: scrolled ? '1px solid var(--navbar-border)' : '1px solid transparent',
@@ -54,33 +56,34 @@ function News() {
     <>
       {/* Navigation */}
       <nav style={navStyle}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <Link to="/"><img src="/tatc.png" alt="Tel-U ATC Logo" style={{ height: '45px', objectFit: 'contain' }} /></Link>
+        <div style={{ maxWidth: '1340px', width: '100%', margin: '0 auto', padding: '0 1.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1.25rem', whiteSpace: 'nowrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+            <Link to="/"><img src="/tatc.png" alt="Tel-U ATC Logo" style={{ height: '38px', objectFit: 'contain', display: 'block' }} /></Link>
           </div>
-          <div style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
-            <Link to="/" style={{ color: 'var(--navbar-text)', opacity: 0.8, textDecoration: 'none', fontSize: '0.95rem', fontWeight: '500', transition: 'color 0.2s' }} onMouseOver={e => e.target.style.color = 'var(--primary-color)'} onMouseOut={e => e.target.style.color = 'var(--navbar-text)'}>Home</Link>
-            <a href="/#programs" style={{ color: 'var(--navbar-text)', opacity: 0.8, textDecoration: 'none', fontSize: '0.95rem', fontWeight: '500', transition: 'color 0.2s' }} onMouseOver={e => e.target.style.color = 'var(--primary-color)'} onMouseOut={e => e.target.style.color = 'var(--navbar-text)'}>Programs</a>
-            <a href="/#about" style={{ color: 'var(--navbar-text)', opacity: 0.8, textDecoration: 'none', fontSize: '0.95rem', fontWeight: '500', transition: 'color 0.2s' }} onMouseOver={e => e.target.style.color = 'var(--primary-color)'} onMouseOut={e => e.target.style.color = 'var(--navbar-text)'}>About Us</a>
-            <Link to="/news" style={{ color: 'var(--primary-color)', textDecoration: 'none', fontSize: '0.95rem', fontWeight: '600' }}>News</Link>
-            <a href="#contacts" style={{ color: 'var(--navbar-text)', opacity: 0.8, textDecoration: 'none', fontSize: '0.95rem', fontWeight: '500', transition: 'color 0.2s' }} onMouseOver={e => e.target.style.color = 'var(--primary-color)'} onMouseOut={e => e.target.style.color = 'var(--navbar-text)'}>Contacts</a>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', whiteSpace: 'nowrap' }}>
+            <Link to="/" style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--navbar-text)', opacity: 0.88, padding: '6px 12px', borderRadius: '999px', textDecoration: 'none', fontSize: '0.9rem', fontWeight: '500', whiteSpace: 'nowrap', transition: 'all 0.2s' }}>Home</Link>
+            <a href="/#programs" style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--navbar-text)', opacity: 0.88, padding: '6px 12px', borderRadius: '999px', textDecoration: 'none', fontSize: '0.9rem', fontWeight: '500', whiteSpace: 'nowrap', transition: 'all 0.2s' }}>Programs</a>
+            <a href="/#about" style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--navbar-text)', opacity: 0.88, padding: '6px 12px', borderRadius: '999px', textDecoration: 'none', fontSize: '0.9rem', fontWeight: '500', whiteSpace: 'nowrap', transition: 'all 0.2s' }}>About Us</a>
+            <Link to="/news" style={{ display: 'inline-flex', alignItems: 'center', color: '#dc2626', background: 'rgba(220, 38, 38, 0.1)', border: '1px solid rgba(220, 38, 38, 0.28)', padding: '6px 14px', borderRadius: '999px', textDecoration: 'none', fontSize: '0.9rem', fontWeight: '700', whiteSpace: 'nowrap' }}>News</Link>
+            <a href="#contacts" style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--navbar-text)', opacity: 0.88, padding: '6px 12px', borderRadius: '999px', textDecoration: 'none', fontSize: '0.9rem', fontWeight: '500', whiteSpace: 'nowrap', transition: 'all 0.2s' }}>Contacts</a>
+            <a href={user ? `http://localhost:8080/amto/sso.php?email=${encodeURIComponent(user.email || '')}&role=${encodeURIComponent(user.role || 'PESERTA')}&target=/my/` : "http://localhost:8080/amto/sso.php?target=/my/"} style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--navbar-text)', opacity: 0.88, padding: '6px 12px', borderRadius: '999px', textDecoration: 'none', fontSize: '0.9rem', fontWeight: '500', whiteSpace: 'nowrap', transition: 'all 0.2s' }}>LMS E-Learning</a>
+          </div>
 
-            <div style={{ display: 'flex', gap: '1rem', marginLeft: '1rem', alignItems: 'center' }}>
-              {user ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <span style={{ color: 'var(--navbar-text)', fontSize: '0.95rem', fontWeight: '600' }}>
-                    Halo, {user.profile?.full_name || user.name || user.email.split('@')[0]}
-                  </span>
-                  <Link to={user.role === 'SUPERADMIN' || user.role === 'ADMIN' ? '/admin' : (user.role === 'INSTRUKTUR' ? '/portal/instructor' : '/portal/participant')} className="btn btn-primary" style={{ padding: '8px 16px', fontSize: '0.85rem' }}>Dashboard</Link>
-                  <button onClick={async () => { await logout(); navigate('/login'); }} className="btn" style={{ padding: '8px 16px', fontSize: '0.85rem', color: '#ef4444', border: '1px solid #ef4444', background: 'transparent', cursor: 'pointer' }}>Logout</button>
-                </div>
-              ) : (
-                <>
-                  <Link to="/login" className="btn" style={{ padding: '8px 20px', fontSize: '0.9rem', color: 'var(--primary-color)', border: '1px solid var(--primary-color)', background: 'transparent' }}>Log In</Link>
-                  <Link to="/register" className="btn btn-primary" style={{ padding: '8px 20px', fontSize: '0.9rem' }}>Sign Up</Link>
-                </>
-              )}
-            </div>
+          <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', flexShrink: 0, whiteSpace: 'nowrap' }}>
+            {user ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', whiteSpace: 'nowrap' }}>
+                <span style={{ color: 'var(--navbar-text)', fontSize: '0.86rem', fontWeight: '600', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  Halo, {user.profile?.full_name || user.name || user.email.split('@')[0]}
+                </span>
+                <Link to={user.role === 'SUPERADMIN' || user.role === 'ADMIN' ? '/admin' : (user.role === 'INSTRUKTUR' ? '/portal/instructor' : '/portal/participant')} className="btn btn-primary" style={{ padding: '7px 15px', fontSize: '0.85rem', whiteSpace: 'nowrap', borderRadius: '8px' }}>Dashboard</Link>
+                <button onClick={async () => { await logout(); navigate('/login'); }} className="btn" style={{ padding: '7px 14px', fontSize: '0.85rem', whiteSpace: 'nowrap', borderRadius: '8px', color: '#ef4444', border: '1px solid #ef4444', background: 'transparent', cursor: 'pointer' }}>Logout</button>
+              </div>
+            ) : (
+              <>
+                <Link to="/login" className="btn" style={{ padding: '7px 18px', fontSize: '0.88rem', whiteSpace: 'nowrap', borderRadius: '8px', color: 'var(--primary-color)', border: '1px solid var(--primary-color)', background: 'transparent' }}>Log In</Link>
+                <Link to="/register" className="btn btn-primary" style={{ padding: '7px 18px', fontSize: '0.88rem', whiteSpace: 'nowrap', borderRadius: '8px' }}>Sign Up</Link>
+              </>
+            )}
           </div>
         </div>
       </nav>

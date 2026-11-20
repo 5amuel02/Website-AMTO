@@ -5,6 +5,7 @@
 require_once(__DIR__ . '/../config.php');
 require_once(__DIR__ . '/lib.php');
 
+amto_auto_sync_from_tatc_cookie();
 require_login();
 amto_ensure_tables();
 
@@ -77,28 +78,36 @@ echo amto_render_shared_styles();
                 <div class="tatc-stat-label">Total Rekaman Audit Trail</div>
                 <div class="tatc-stat-value"><?php echo count($all_logs); ?> Event</div>
             </div>
-            <div class="tatc-stat-icon">🛡️</div>
+            <div class="tatc-stat-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
         </div>
         <div class="tatc-stat-card">
             <div>
                 <div class="tatc-stat-label">Katalog Role RBAC Aktif</div>
                 <div class="tatc-stat-value" style="color:#15803d;">8 Role (R01–R08)</div>
             </div>
-            <div class="tatc-stat-icon" style="background:#dcfce7; color:#15803d;">🔐</div>
+            <div class="tatc-stat-icon" style="background:#dcfce7; color:#15803d;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
         </div>
         <div class="tatc-stat-card">
             <div>
                 <div class="tatc-stat-label">Role Aktif Anda Saat Ini</div>
                 <div class="tatc-stat-value" style="color:#1d4ed8; font-size:18px;"><?php echo s($catalogue[$rbac_role]['name'] ?? strtoupper($rbac_role)); ?></div>
             </div>
-            <div class="tatc-stat-icon" style="background:#dbeafe; color:#1d4ed8;">👤</div>
+            <div class="tatc-stat-icon" style="background:#dbeafe; color:#1d4ed8;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
         </div>
         <div class="tatc-stat-card">
             <div>
                 <div class="tatc-stat-label">Status Kontrol SoD &amp; Void</div>
                 <div class="tatc-stat-value" style="color:#15803d; font-size:18px;">SEC-03 &amp; SEC-05 Aktif</div>
             </div>
-            <div class="tatc-stat-icon" style="background:#dcfce7; color:#15803d;">✓</div>
+            <div class="tatc-stat-icon" style="background:#dcfce7; color:#15803d;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </div>
         </div>
     </div>
 
@@ -182,7 +191,7 @@ echo amto_render_shared_styles();
                             <td><code><?php echo s($u[1]); ?></code></td>
                             <td><strong><?php echo s($u[2]); ?></strong></td>
                             <td style="font-size:12.5px; color:#475569;"><?php echo s($u[3]); ?></td>
-                            <td><span class="tatc-badge tatc-badge-approved">✓ <?php echo s($u[4]); ?></span></td>
+                            <td><span class="tatc-badge tatc-badge-approved"><?php echo s($u[4]); ?></span></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>

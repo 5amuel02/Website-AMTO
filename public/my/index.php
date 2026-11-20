@@ -212,9 +212,10 @@ if (core_userfeedback::should_display_reminder()) {
     core_userfeedback::print_reminder_block();
 }
 
-echo $OUTPUT->addblockbutton('content');
-
-echo $OUTPUT->custom_block_region('content');
+if (!empty($USER->editing)) {
+    echo $OUTPUT->addblockbutton('content');
+    echo $OUTPUT->custom_block_region('content');
+}
 
 echo $OUTPUT->footer();
 

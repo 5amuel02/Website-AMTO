@@ -23,7 +23,14 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const logout = useCallback(async () => {
-    try { await apiFetch('/api/auth/logout', { method: 'POST' }); } finally {
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST' });
+      fetch('http://localhost:8080/amto/sso.php?action=logout', {
+        method: 'GET',
+        mode: 'no-cors',
+        credentials: 'include'
+      }).catch(() => {});
+    } finally {
       sessionStorage.removeItem(PARTICIPANT_LAST_ACTIVITY_KEY);
       setUser(null);
     }

@@ -150,6 +150,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
         $record->timemodified = time();
 
         $new_reg_id = $DB->insert_record('amto_registrations', $record);
+        if (function_exists('amto_sync_cross_db')) {
+            amto_sync_cross_db(true);
+        }
         if (function_exists('amto_log_audit_event')) {
             amto_log_audit_event('REGISTRATION_CREATE', 'amto_registrations', (int)$new_reg_id, "reg_no={$reg_no}, status=pending", "New participant registration submitted for username={$username}, program={$prog_name}");
         }
@@ -272,6 +275,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_verify_reg && in_array($action
             $reg->verified_by = $USER->id;
             $reg->timemodified = time();
             $DB->update_record('amto_registrations', $reg);
+            if (function_exists('amto_sync_cross_db')) {
+                amto_sync_cross_db(true);
+            }
             if (function_exists('amto_log_audit_event')) {
                 amto_log_audit_event('REGISTRATION_APPROVE', 'amto_registrations', $regid, 'status: pending -> approved', "Approved registration {$reg->registration_no} ({$reg->username}), linked Moodle userid={$target_userid}");
             }

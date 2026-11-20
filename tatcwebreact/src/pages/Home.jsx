@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../lib/api';
@@ -7,6 +7,11 @@ function Home() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [scrolled, setScrolled] = useState(false);
+  const [activeSection, setActiveSection] = useState(() => {
+    const h = window.location.hash ? window.location.hash.replace('#', '') : '';
+    return ['home', 'programs', 'about', 'news', 'contacts'].includes(h) ? h : 'home';
+  });
+  const clickLockUntil = useRef(0);
   const [banners, setBanners] = useState([]);
   const [partners, setPartners] = useState([]);
   const [recentNews, setRecentNews] = useState([]);
@@ -14,10 +19,44 @@ function Home() {
   const [selectedProgram, setSelectedProgram] = useState(null);
 
   useEffect(() => {
-    const handleScroll = () => {
+    const detectSectionFromScroll = () => {
       setScrolled(window.scrollY > 20);
+      if (Date.now() < clickLockUntil.current) return;
+
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 100) {
+        setActiveSection('contacts');
+        return;
+      }
+      if (window.scrollY < 220) {
+        setActiveSection('home');
+        return;
+      }
+
+      const sectionOrder = ['contacts', 'news', 'about', 'programs'];
+      for (const sec of sectionOrder) {
+        const el = document.getElementById(sec);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          if (rect.top <= 200) {
+            setActiveSection(sec);
+            return;
+          }
+        }
+      }
+      setActiveSection('home');
     };
-    window.addEventListener('scroll', handleScroll);
+
+    const handleHashChange = () => {
+      const h = window.location.hash ? window.location.hash.replace('#', '') : 'home';
+      if (['home', 'programs', 'about', 'news', 'contacts'].includes(h)) {
+        clickLockUntil.current = Date.now() + 700;
+        setActiveSection(h);
+      }
+    };
+
+    detectSectionFromScroll();
+    window.addEventListener('scroll', detectSectionFromScroll, { passive: true });
+    window.addEventListener('hashchange', handleHashChange);
 
     // Fetch CMS Data
     apiFetch('/api/cms/banners?public=true')
@@ -41,47 +80,136 @@ function Home() {
       .then(res => res.json())
       .then(json => { if (json.success) setOpenPrograms(json.data); });
 
-    return () => window.removeEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', detectSectionFromScroll);
+      window.removeEventListener('hashchange', handleHashChange);
+    };
   }, []);
+
+  const handleNavClick = (section) => {
+    clickLockUntil.current = Date.now() + 750;
+    setActiveSection(section);
+  };
+
+  const getNavItemStyle = (sectionKey) => {
+    const isActive = activeSection === sectionKey;
+    if (isActive) {
+      return {
+        display: 'inline-flex',
+        alignItems: 'center',
+        color: scrolled ? '#dc2626' : '#ffffff',
+        background: scrolled ? 'rgba(220, 38, 38, 0.1)' : 'rgba(220, 38, 38, 0.88)',
+        border: scrolled ? '1px solid rgba(220, 38, 38, 0.28)' : '1px solid rgba(255, 255, 255, 0.3)',
+        padding: '6px 14px',
+        borderRadius: '999px',
+        textDecoration: 'none',
+        fontSize: '0.9rem',
+        fontWeight: '700',
+        whiteSpace: 'nowrap',
+        transition: 'all 0.2s ease'
+      };
+    }
+    return {
+      display: 'inline-flex',
+      alignItems: 'center',
+      color: scrolled ? 'var(--navbar-text)' : '#ffffff',
+      opacity: scrolled ? 0.88 : 0.92,
+      background: 'transparent',
+      border: '1px solid transparent',
+      padding: '6px 12px',
+      borderRadius: '999px',
+      textDecoration: 'none',
+      fontSize: '0.9rem',
+      fontWeight: '500',
+      whiteSpace: 'nowrap',
+      transition: 'all 0.2s ease'
+    };
+  };
 
   return (
     <>
       {/* Navigation */}
       <nav style={{
-        padding: scrolled ? '1rem 0' : '1.5rem 0',
-        background: scrolled ? 'var(--navbar-bg)' : 'transparent',
-        backdropFilter: scrolled ? 'blur(16px)' : 'none',
-        borderBottom: scrolled ? '1px solid var(--navbar-border)' : '1px solid transparent',
-        boxShadow: scrolled ? '0 4px 20px -2px rgba(15,23,42,0.1)' : 'none',
+        height: '76px',
+        display: 'flex',
+        alignItems: 'center',
+        background: scrolled ? 'var(--navbar-bg)' : 'rgba(15, 23, 42, 0.65)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        borderBottom: scrolled ? '1px solid var(--navbar-border)' : '1px solid rgba(255, 255, 255, 0.12)',
+        boxShadow: scrolled ? '0 4px 20px -2px rgba(15,23,42,0.1)' : '0 4px 20px -2px rgba(0,0,0,0.2)',
         position: 'fixed', width: '100%', top: 0, zIndex: 50, transition: 'all 0.3s ease'
       }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <img src="/tatc.png" alt="Tel-U ATC Logo" style={{ height: '45px', objectFit: 'contain', transition: 'filter 0.3s' }} />
+        <div style={{ maxWidth: '1340px', width: '100%', margin: '0 auto', padding: '0 1.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1.25rem', whiteSpace: 'nowrap' }}>
+          {/* Left: Brand Logo */}
+          <Link to="/" onClick={() => handleNavClick('home')} style={{ display: 'flex', alignItems: 'center', flexShrink: 0, textDecoration: 'none', background: scrolled ? 'transparent' : 'rgba(255, 255, 255, 0.95)', padding: scrolled ? '0' : '6px 14px', borderRadius: '10px', boxShadow: scrolled ? 'none' : '0 2px 10px rgba(0,0,0,0.15)', transition: 'all 0.3s ease' }}>
+            <img src="/tatc.png" alt="Tel-U ATC Logo" style={{ height: '38px', objectFit: 'contain', display: 'block' }} />
+          </Link>
+
+          {/* Center: Navigation Links */}
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', whiteSpace: 'nowrap' }}>
+            <a href="#" onClick={() => handleNavClick('home')} style={getNavItemStyle('home')}>Home</a>
+            <a href="#programs" onClick={() => handleNavClick('programs')} style={getNavItemStyle('programs')}>Programs</a>
+            <a href="#about" onClick={() => handleNavClick('about')} style={getNavItemStyle('about')}>About Us</a>
+            <a href="#news" onClick={() => handleNavClick('news')} style={getNavItemStyle('news')}>News</a>
+            <a href="#contacts" onClick={() => handleNavClick('contacts')} style={getNavItemStyle('contacts')}>Contacts</a>
+            <a
+              href={user ? `http://localhost:8080/amto/sso.php?email=${encodeURIComponent(user.email || '')}&role=${encodeURIComponent(user.role || 'PESERTA')}&target=/my/` : "http://localhost:8080/amto/sso.php?target=/my/"}
+              style={getNavItemStyle('lms')}
+            >
+              <span>LMS E-Learning</span>
+            </a>
           </div>
-          <div style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
-            <a href="#" style={{ color: scrolled ? 'var(--navbar-text)' : '#ffffff', textDecoration: 'none', fontSize: '0.95rem', fontWeight: '500', transition: 'color 0.2s' }} onMouseOver={e => e.target.style.color = 'var(--primary-color)'} onMouseOut={e => e.target.style.color = scrolled ? 'var(--navbar-text)' : '#ffffff'}>Home</a>
-            <a href="#programs" style={{ color: scrolled ? 'var(--navbar-text)' : '#ffffff', opacity: scrolled ? 0.8 : 0.9, textDecoration: 'none', fontSize: '0.95rem', fontWeight: '500', transition: 'color 0.2s' }} onMouseOver={e => e.target.style.color = 'var(--primary-color)'} onMouseOut={e => e.target.style.color = scrolled ? 'var(--navbar-text)' : '#ffffff'}>Programs</a>
-            <a href="#about" style={{ color: scrolled ? 'var(--navbar-text)' : '#ffffff', opacity: scrolled ? 0.8 : 0.9, textDecoration: 'none', fontSize: '0.95rem', fontWeight: '500', transition: 'color 0.2s' }} onMouseOver={e => e.target.style.color = 'var(--primary-color)'} onMouseOut={e => e.target.style.color = scrolled ? 'var(--navbar-text)' : '#ffffff'}>About Us</a>
-            <a href="#news" style={{ color: scrolled ? 'var(--navbar-text)' : '#ffffff', opacity: scrolled ? 0.8 : 0.9, textDecoration: 'none', fontSize: '0.95rem', fontWeight: '500', transition: 'color 0.2s' }} onMouseOver={e => e.target.style.color = 'var(--primary-color)'} onMouseOut={e => e.target.style.color = scrolled ? 'var(--navbar-text)' : '#ffffff'}>News</a>
-            <a href={user ? `http://localhost:8080/amto/sso.php?email=${encodeURIComponent(user.email || '')}&role=${encodeURIComponent(user.role || 'PESERTA')}&target=/my/` : "http://localhost:8080/amto/sso.php?target=/my/"} style={{ color: scrolled ? 'var(--primary-color)' : '#ffffff', background: scrolled ? 'rgba(220,38,38,0.1)' : 'rgba(255,255,255,0.18)', padding: '6px 14px', borderRadius: '999px', textDecoration: 'none', fontSize: '0.9rem', fontWeight: '700', transition: 'all 0.2s' }}>LMS E-Learning</a>
-            <a href="#contacts" style={{ color: scrolled ? 'var(--navbar-text)' : '#ffffff', opacity: scrolled ? 0.8 : 0.9, textDecoration: 'none', fontSize: '0.95rem', fontWeight: '500', transition: 'color 0.2s' }} onMouseOver={e => e.target.style.color = 'var(--primary-color)'} onMouseOut={e => e.target.style.color = scrolled ? 'var(--navbar-text)' : '#ffffff'}>Contacts</a>
-            <div style={{ display: 'flex', gap: '1rem', marginLeft: '1rem', alignItems: 'center' }}>
-              {user ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <span style={{ color: scrolled ? 'var(--navbar-text)' : '#ffffff', fontSize: '0.95rem', fontWeight: '600' }}>
-                    Halo, {user.profile?.full_name || user.name || user.email.split('@')[0]}
+
+          {/* Right: User Greeting & Action Buttons */}
+          <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', flexShrink: 0, whiteSpace: 'nowrap' }}>
+            {user ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', whiteSpace: 'nowrap' }}>
+                <div style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '5px 12px 5px 6px',
+                  borderRadius: '999px',
+                  background: scrolled ? 'rgba(15, 23, 42, 0.05)' : 'rgba(255, 255, 255, 0.14)',
+                  border: scrolled ? '1px solid rgba(15, 23, 42, 0.08)' : '1px solid rgba(255, 255, 255, 0.2)'
+                }}>
+                  <span style={{
+                    width: '26px',
+                    height: '26px',
+                    borderRadius: '50%',
+                    background: '#dc2626',
+                    color: '#ffffff',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.78rem',
+                    fontWeight: '700',
+                    flexShrink: 0
+                  }}>
+                    {(user.profile?.full_name || user.name || user.email || 'U').trim().charAt(0).toUpperCase()}
                   </span>
-                  <Link to={user.role === 'SUPERADMIN' || user.role === 'ADMIN' ? '/admin' : (user.role === 'INSTRUKTUR' ? '/portal/instructor' : '/portal/participant')} className="btn btn-primary" style={{ padding: '8px 16px', fontSize: '0.85rem' }}>Dashboard</Link>
-                  <button onClick={async () => { await logout(); navigate('/login'); }} className="btn" style={{ padding: '8px 16px', fontSize: '0.85rem', color: scrolled ? '#ef4444' : '#ffb3b3', border: `1px solid ${scrolled ? '#ef4444' : '#ffb3b3'}`, background: 'transparent', cursor: 'pointer' }}>Logout</button>
+                  <span style={{
+                    color: scrolled ? 'var(--navbar-text)' : '#ffffff',
+                    fontSize: '0.86rem',
+                    fontWeight: '600',
+                    maxWidth: '150px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }} title={user.profile?.full_name || user.name || user.email}>
+                    {user.profile?.full_name || user.name || user.email.split('@')[0]}
+                  </span>
                 </div>
-              ) : (
-                <>
-                  <Link to="/login" className="btn" style={{ padding: '8px 20px', fontSize: '0.9rem', color: scrolled ? 'var(--primary-color)' : '#ffffff', border: `1px solid ${scrolled ? 'var(--primary-color)' : '#ffffff'}`, background: 'transparent' }}>Log In</Link>
-                  <Link to="/register" className="btn btn-primary" style={{ padding: '8px 20px', fontSize: '0.9rem' }}>Sign Up</Link>
-                </>
-              )}
-            </div>
+                <Link to={user.role === 'SUPERADMIN' || user.role === 'ADMIN' ? '/admin' : (user.role === 'INSTRUKTUR' ? '/portal/instructor' : '/portal/participant')} className="btn btn-primary" style={{ padding: '7px 15px', fontSize: '0.85rem', whiteSpace: 'nowrap', borderRadius: '8px' }}>Dashboard</Link>
+                <button onClick={async () => { await logout(); navigate('/login'); }} className="btn" style={{ padding: '7px 14px', fontSize: '0.85rem', whiteSpace: 'nowrap', borderRadius: '8px', color: scrolled ? '#dc2626' : '#fecaca', border: `1px solid ${scrolled ? '#fca5a5' : 'rgba(254, 202, 202, 0.5)'}`, background: scrolled ? 'rgba(254, 226, 226, 0.4)' : 'rgba(15, 23, 42, 0.25)', cursor: 'pointer' }}>Logout</button>
+              </div>
+            ) : (
+              <>
+                <Link to="/login" className="btn" style={{ padding: '7px 18px', fontSize: '0.88rem', whiteSpace: 'nowrap', borderRadius: '8px', color: scrolled ? 'var(--primary-color)' : '#ffffff', border: `1px solid ${scrolled ? 'var(--primary-color)' : '#ffffff'}`, background: 'transparent' }}>Log In</Link>
+                <Link to="/register" className="btn btn-primary" style={{ padding: '7px 18px', fontSize: '0.88rem', whiteSpace: 'nowrap', borderRadius: '8px' }}>Sign Up</Link>
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -137,43 +265,45 @@ function Home() {
         <div style={{ width: '100%', height: '1px', background: 'linear-gradient(to right, transparent, rgba(0,0,0,0.1), transparent)', margin: '0 auto 4rem' }}></div>
 
         {/* Open Programs Section - Core Offerings */}
-        {openPrograms.length > 0 && (
-          <>
-            <div id="programs" style={{ width: '100%', padding: '0 2rem 6rem', textAlign: 'center' }}>
-              <h2 style={{ fontSize: '2.5rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.5rem' }}>Program yang Dibuka</h2>
-              <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem', marginBottom: '3rem' }}>Daftarkan dirimu segera pada program unggulan kami</p>
-              <div className="animate-fade-in-up delay-200" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '2rem', maxWidth: '1200px', width: '100%', margin: '0 auto' }}>
-                {openPrograms.map(prog => (
-                  <div key={prog.batch_id} className="premium-card" style={{ width: '320px', padding: '2rem', textAlign: 'left', display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ padding: '6px 12px', background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '700', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '1rem', alignSelf: 'flex-start' }}>
-                      Pendaftaran Dibuka
+        <div id="programs" style={{ scrollMarginTop: '90px' }}>
+          {openPrograms.length > 0 && (
+            <>
+              <div style={{ width: '100%', padding: '0 2rem 6rem', textAlign: 'center' }}>
+                <h2 style={{ fontSize: '2.5rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.5rem' }}>Program yang Dibuka</h2>
+                <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem', marginBottom: '3rem' }}>Daftarkan dirimu segera pada program unggulan kami</p>
+                <div className="animate-fade-in-up delay-200" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '2rem', maxWidth: '1200px', width: '100%', margin: '0 auto' }}>
+                  {openPrograms.map(prog => (
+                    <div key={prog.batch_id} className="premium-card" style={{ width: '320px', padding: '2rem', textAlign: 'left', display: 'flex', flexDirection: 'column' }}>
+                      <div style={{ padding: '6px 12px', background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '700', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '1rem', alignSelf: 'flex-start' }}>
+                        Pendaftaran Dibuka
+                      </div>
+                      <h3 style={{ fontSize: '1.25rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-main)' }}>{prog.program_name}</h3>
+                      <div style={{ fontSize: '0.9rem', color: 'var(--primary-color)', fontWeight: '600', marginBottom: '1rem' }}>Batch: {prog.batch_name}</div>
+                      <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', marginBottom: '1.5rem', flex: 1, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {prog.description || 'Program pelatihan aviasi dengan standar kurikulum terkini.'}
+                      </p>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button onClick={() => setSelectedProgram(prog)} className="btn" style={{ flex: 1, padding: '10px 0', fontSize: '0.9rem', background: 'var(--surface-color)', border: '1px solid var(--border-color)', color: 'var(--text-main)' }}>
+                          Persyaratan
+                        </button>
+                        <Link to={user ? `/portal/register?program_id=${prog.program_id}&batch_id=${prog.batch_id}` : "/login"} className="btn btn-primary" style={{ flex: 1, textAlign: 'center', padding: '10px 0', fontSize: '0.9rem' }}>
+                          Daftar
+                        </Link>
+                      </div>
                     </div>
-                    <h3 style={{ fontSize: '1.25rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-main)' }}>{prog.program_name}</h3>
-                    <div style={{ fontSize: '0.9rem', color: 'var(--primary-color)', fontWeight: '600', marginBottom: '1rem' }}>Batch: {prog.batch_name}</div>
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', marginBottom: '1.5rem', flex: 1, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {prog.description || 'Program pelatihan aviasi dengan standar kurikulum terkini.'}
-                    </p>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button onClick={() => setSelectedProgram(prog)} className="btn" style={{ flex: 1, padding: '10px 0', fontSize: '0.9rem', background: 'var(--surface-color)', border: '1px solid var(--border-color)', color: 'var(--text-main)' }}>
-                        Persyaratan
-                      </button>
-                      <Link to={user ? `/portal/register?program_id=${prog.program_id}&batch_id=${prog.batch_id}` : "/login"} className="btn btn-primary" style={{ flex: 1, textAlign: 'center', padding: '10px 0', fontSize: '0.9rem' }}>
-                        Daftar
-                      </Link>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-            {/* Decorative Divider */}
-            <div style={{ width: '100%', height: '1px', background: 'linear-gradient(to right, transparent, rgba(0,0,0,0.1), transparent)', margin: '0 auto 4rem' }}></div>
-          </>
-        )}
+              {/* Decorative Divider */}
+              <div style={{ width: '100%', height: '1px', background: 'linear-gradient(to right, transparent, rgba(0,0,0,0.1), transparent)', margin: '0 auto 4rem' }}></div>
+            </>
+          )}
 
-        {/* Feature Cards / Why Choose Us */}
-        <div id="features" style={{ width: '100%', padding: '0 2rem', textAlign: 'center' }}>
-          <h2 style={{ fontSize: '2.5rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.5rem' }}>Why Choose Us</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>Discover the excellence of Tel-U Aviation Training Center</p>
+          {/* Feature Cards / Why Choose Us */}
+          <div id="features" style={{ width: '100%', padding: '0 2rem', textAlign: 'center' }}>
+            <h2 style={{ fontSize: '2.5rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.5rem' }}>Why Choose Us</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>Discover the excellence of Tel-U Aviation Training Center</p>
+          </div>
         </div>
         <div className="animate-fade-in-up delay-300" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '2rem', maxWidth: '1200px', width: '100%', padding: '3rem 2rem 6rem', margin: '0 auto' }}>
           <div className="premium-card" style={{ width: '260px', padding: '2rem', textAlign: 'left' }}>

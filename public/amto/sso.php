@@ -2,6 +2,23 @@
 require_once(__DIR__ . '/../config.php');
 require_once(__DIR__ . '/lib.php');
 
+$action = optional_param('action', 'login', PARAM_ALPHA);
+if ($action === 'logout') {
+    unset($_SESSION['amto_last_tatc_token']);
+    setcookie('tatc_session', '', time() - 3600, '/', '', false, true);
+    if (isloggedin() && !isguestuser()) {
+        require_logout();
+    }
+    $target = optional_param('target', '', PARAM_RAW);
+    if ($target !== '') {
+        header('Location: ' . $target);
+        exit;
+    }
+    header('Content-Type: application/json');
+    echo json_encode(['success' => true, 'message' => 'Moodle session logged out']);
+    exit;
+}
+
 $email = optional_param('email', '', PARAM_EMAIL);
 $role = optional_param('role', 'PESERTA', PARAM_TEXT);
 $name = optional_param('name', '', PARAM_TEXT);

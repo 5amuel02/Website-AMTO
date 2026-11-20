@@ -60,9 +60,13 @@ function amto_ensure_tables(): void {
         $DB->execute($sql);
     } else {
         // [SEC-FIX-04] SEC-03 Segregation of Duties: Ensure created_by column exists to prevent self-approval
-        $reg_cols = $DB->get_columns('amto_registrations');
+        $reg_cols = $DB->get_columns('amto_registrations', false);
         if (!isset($reg_cols['created_by'])) {
-            $DB->execute("ALTER TABLE {amto_registrations} ADD COLUMN created_by BIGINT(10) NOT NULL DEFAULT 0 AFTER admin_notes");
+            try {
+                $DB->execute("ALTER TABLE {amto_registrations} ADD COLUMN IF NOT EXISTS created_by BIGINT(10) NOT NULL DEFAULT 0 AFTER admin_notes");
+            } catch (Throwable $e) {
+                // Column already exists
+            }
         }
     }
 
@@ -89,9 +93,13 @@ function amto_ensure_tables(): void {
         $DB->execute($sql);
     } else {
         // [SEC-FIX-03] DP-09 Ensure SHA-256 file_hash column exists for document integrity
-        $cols = $DB->get_columns('amto_repository');
+        $cols = $DB->get_columns('amto_repository', false);
         if (!isset($cols['file_hash'])) {
-            $DB->execute("ALTER TABLE {amto_repository} ADD COLUMN file_hash VARCHAR(64) NOT NULL DEFAULT '' AFTER file_size");
+            try {
+                $DB->execute("ALTER TABLE {amto_repository} ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64) NOT NULL DEFAULT '' AFTER file_size");
+            } catch (Throwable $e) {
+                // Column already exists
+            }
         }
         // Backfill SHA-256 checksums for existing repository files
         $existing_mods = $DB->get_records('amto_repository');
@@ -128,6 +136,269 @@ function amto_ensure_tables(): void {
     if ($DB->count_records('amto_audit_logs') === 0) {
         amto_log_audit_event('SECURITY_BASELINE_INIT', 'mdl_role', 8, '8 Role RBAC (R01-R08) & IAM Policies Active', 'Initialized 8 AMTO RBAC roles, CSRF sesskey, SHA-256 integrity, SoD, and Soft-Delete/Void controls.');
         amto_log_audit_event('REPO_INTEGRITY_VERIFIED', 'amto_repository', 1, 'SHA-256 Checksum Verified (DP-09)', 'Verified cryptographic SHA-256 checksum on controlled CASR Part 147 training manuals.');
+    }
+
+    amto_sync_cross_db();
+}
+
+/**
+ * 2-Way Data Synchronization between Portal Web TATC (tatc_web) and Moodle LMS (moodle).
+ * Keeps batches/schedules and participant registrations unified across both databases on MariaDB 3307.
+ */
+function amto_sync_cross_db(bool $force = false): void {
+    global $DB;
+    static $synced = false;
+    if ($synced && !$force) {
+        return;
+    }
+    $synced = true;
+
+    try {
+        // Verify tatc_web database is accessible on the same MariaDB server
+        $has_tatc = $DB->get_records_sql("SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'tatc_web'");
+        if (empty($has_tatc)) {
+            return;
+        }
+
+        // --- A. 2-WAY SYNC: SCHEDULES & BATCHES (tatc_web.batches <-> moodle.mdl_amto_schedules) ---
+        $tatc_batches = $DB->get_records_sql("
+            SELECT b.id, b.code, b.name, b.start_date, b.end_date, b.status, p.name AS program_name
+              FROM tatc_web.batches b
+              LEFT JOIN tatc_web.programs p ON p.id = b.program_id
+             WHERE b.deleted_at IS NULL
+        ");
+        foreach ($tatc_batches as $tb) {
+            $bcode = trim((string)$tb->code);
+            if ($bcode === '') {
+                continue;
+            }
+            $exists_moodle = $DB->get_record('amto_schedules', ['batch_code' => $bcode]);
+            if (!$exists_moodle) {
+                $tstatus = strtoupper((string)$tb->status);
+                $mstatus = 'Open Registration';
+                if (in_array($tstatus, ['ONGOING', 'ACTIVE', 'IN_PROGRESS'], true)) {
+                    $mstatus = 'Ongoing';
+                } else if (in_array($tstatus, ['COMPLETED', 'CLOSED', 'DONE'], true)) {
+                    $mstatus = 'Completed';
+                }
+                $ns = new stdClass();
+                $ns->batch_code      = $bcode;
+                $ns->program_name    = !empty($tb->program_name) ? $tb->program_name : $tb->name;
+                $ns->category_type   = 'Basic License';
+                $ns->training_mode   = 'Blended (Theory & Practical)';
+                $ns->room_location   = 'TATC Classroom & Hangar';
+                $ns->instructor_name = 'Tim Instruktur TATC';
+                $ns->start_date      = !empty($tb->start_date) ? substr((string)$tb->start_date, 0, 10) : date('Y-m-d');
+                $ns->end_date        = !empty($tb->end_date) ? substr((string)$tb->end_date, 0, 10) : date('Y-m-d', strtotime('+14 days'));
+                $ns->schedule_time   = 'Senin - Jumat, 08:00 - 16:00 WIB';
+                $ns->quota           = 24;
+                $ns->status          = $mstatus;
+                $ns->timecreated     = time();
+                $DB->insert_record('amto_schedules', $ns);
+            }
+        }
+
+        // Sync Moodle schedules -> tatc_web.batches
+        $moodle_schedules = $DB->get_records('amto_schedules');
+        foreach ($moodle_schedules as $ms) {
+            if (strtolower((string)$ms->status) === 'voided' || strtolower((string)$ms->status) === 'void') {
+                continue;
+            }
+            $bcode = trim((string)$ms->batch_code);
+            if ($bcode === '') {
+                continue;
+            }
+            $exists_tatc = $DB->get_records_sql("SELECT id FROM tatc_web.batches WHERE code = ?", [$bcode]);
+            if (empty($exists_tatc)) {
+                $prog_rows = $DB->get_records_sql("SELECT id FROM tatc_web.programs WHERE name = ? LIMIT 1", [$ms->program_name]);
+                if (!empty($prog_rows)) {
+                    $prog_id = (int)reset($prog_rows)->id;
+                } else {
+                    $pcode = 'PRG-' . strtoupper(preg_replace('/[^A-Za-z0-9]/', '', substr($bcode, -8))) . '-' . substr((string)$ms->id, 0, 3);
+                    $DB->execute(
+                        "INSERT IGNORE INTO tatc_web.programs (code, name, description, passing_grade, minimum_attendance_percent, status, created_at, updated_at)
+                         VALUES (?, ?, ?, 75.00, 80.00, 'ACTIVE', NOW(), NOW())",
+                        [$pcode, $ms->program_name, 'Program Pelatihan CASR Part 147 AMTO (' . $ms->category_type . ')']
+                    );
+                    $prog_rows2 = $DB->get_records_sql("SELECT id FROM tatc_web.programs WHERE name = ? OR code = ? LIMIT 1", [$ms->program_name, $pcode]);
+                    $prog_id = !empty($prog_rows2) ? (int)reset($prog_rows2)->id : 1;
+                }
+
+                $t_status = 'PLANNED';
+                if ($ms->status === 'Open Registration') {
+                    $t_status = 'OPEN';
+                } else if ($ms->status === 'Ongoing') {
+                    $t_status = 'ONGOING';
+                } else if ($ms->status === 'Completed') {
+                    $t_status = 'COMPLETED';
+                }
+                $sdate = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$ms->start_date) ? $ms->start_date : date('Y-m-d');
+                $edate = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$ms->end_date) ? $ms->end_date : date('Y-m-d', strtotime('+14 days'));
+                $DB->execute(
+                    "INSERT IGNORE INTO tatc_web.batches (program_id, code, name, start_date, end_date, status, registration_fee, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, 0.00, NOW(), NOW())",
+                    [$prog_id, $bcode, $ms->program_name, $sdate, $edate, $t_status]
+                );
+            }
+        }
+
+        // --- B. 2-WAY SYNC: PARTICIPANT REGISTRATIONS (tatc_web.participant_registrations <-> moodle.mdl_amto_registrations) ---
+        $tatc_regs = $DB->get_records_sql("
+            SELECT r.id AS reg_id, r.status AS reg_status, r.notes, r.submitted_at,
+                   p.id AS part_id, p.participant_number, p.full_name, p.email, p.phone, p.nik, p.institution,
+                   b.code AS batch_code, b.name AS batch_name, pr.name AS program_name
+              FROM tatc_web.participant_registrations r
+              JOIN tatc_web.participants p ON p.id = r.participant_id
+              JOIN tatc_web.batches b ON b.id = r.batch_id
+              LEFT JOIN tatc_web.programs pr ON pr.id = b.program_id
+        ");
+        foreach ($tatc_regs as $tr) {
+            $email = strtolower(trim((string)$tr->email));
+            $reg_no = !empty($tr->participant_number) ? trim((string)$tr->participant_number) : ('REG-TATC-' . str_pad((string)$tr->reg_id, 4, '0', STR_PAD_LEFT));
+            $prog_name = !empty($tr->program_name) ? ($tr->batch_code . ' – ' . $tr->program_name) : ($tr->batch_code . ' – ' . $tr->batch_name);
+
+            $tstat = strtoupper((string)$tr->reg_status);
+            $mstat = 'pending';
+            if (in_array($tstat, ['APPROVED', 'VERIFIED', 'PAID', 'ACTIVE', 'ENROLLED'], true)) {
+                $mstat = 'approved';
+            } else if (in_array($tstat, ['REJECTED', 'CANCELLED'], true)) {
+                $mstat = 'rejected';
+            }
+
+            $existing_mreg = $DB->get_record_sql(
+                "SELECT * FROM {amto_registrations} WHERE registration_no = :r OR (LOWER(email) = :e AND email <> '') LIMIT 1",
+                ['r' => $reg_no, 'e' => $email]
+            );
+            if (!$existing_mreg) {
+                $sched = $DB->get_record('amto_schedules', ['batch_code' => $tr->batch_code]);
+                $uname = $email !== '' ? preg_replace('/[^a-z0-9]/', '', explode('@', $email)[0]) : ('peserta' . $tr->reg_id);
+                if ($uname === '') {
+                    $uname = 'peserta' . $tr->reg_id;
+                }
+                $muser = ($email !== '') ? $DB->get_record_sql("SELECT id, username FROM {user} WHERE LOWER(email) = ? AND deleted = 0 LIMIT 1", [$email]) : null;
+
+                $nr = new stdClass();
+                $nr->registration_no = $reg_no;
+                $nr->userid          = $muser ? (int)$muser->id : 0;
+                $nr->username        = $muser ? $muser->username : $uname;
+                $nr->fullname        = $tr->full_name;
+                $nr->email           = $email ?: ($uname . '@tatc.id');
+                $nr->phone           = (string)($tr->phone ?: '-');
+                $nr->nik             = (string)($tr->nik ?: '3273000000000000');
+                $nr->organization    = (string)($tr->institution ?: 'TATC Portal');
+                $nr->amel_no         = '-';
+                $nr->schedule_id     = $sched ? (int)$sched->id : 0;
+                $nr->program_name    = $prog_name;
+                $nr->password_hash   = '';
+                $nr->doc_ktp         = '';
+                $nr->doc_ijazah      = '';
+                $nr->doc_pendukung   = '';
+                $nr->status          = $mstat;
+                $nr->admin_notes     = $tr->notes ?: 'Disinkronkan otomatis dari Portal Web TATC';
+                $nr->created_by      = 0;
+                $nr->verified_by     = ($mstat === 'approved') ? 2 : 0;
+                $nr->timecreated     = !empty($tr->submitted_at) ? (strtotime((string)$tr->submitted_at) ?: time()) : time();
+                $nr->timemodified    = time();
+                $DB->insert_record('amto_registrations', $nr);
+            } else if ($existing_mreg->status === 'pending' && $mstat !== 'pending') {
+                $existing_mreg->status = $mstat;
+                $existing_mreg->timemodified = time();
+                $DB->update_record('amto_registrations', $existing_mreg);
+            }
+        }
+
+        // Sync Moodle registrations -> tatc_web.participant_registrations
+        $moodle_regs = $DB->get_records('amto_registrations');
+        foreach ($moodle_regs as $mr) {
+            if (in_array(strtolower((string)$mr->status), ['void', 'voided'], true)) {
+                continue;
+            }
+            $email = strtolower(trim((string)$mr->email));
+            $part_rows = $DB->get_records_sql(
+                "SELECT id FROM tatc_web.participants WHERE participant_number = ? OR (LOWER(email) = ? AND email <> '') LIMIT 1",
+                [$mr->registration_no, $email]
+            );
+            if (!empty($part_rows)) {
+                $part_id = (int)reset($part_rows)->id;
+            } else {
+                $DB->execute(
+                    "INSERT IGNORE INTO tatc_web.participants (participant_number, full_name, phone, email, status, nik, institution, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, NOW(), NOW())",
+                    [$mr->registration_no, $mr->fullname, $mr->phone, $email, substr((string)$mr->nik, 0, 20), $mr->organization]
+                );
+                $part_rows2 = $DB->get_records_sql(
+                    "SELECT id FROM tatc_web.participants WHERE participant_number = ? OR (LOWER(email) = ? AND email <> '') LIMIT 1",
+                    [$mr->registration_no, $email]
+                );
+                if (empty($part_rows2)) {
+                    continue;
+                }
+                $part_id = (int)reset($part_rows2)->id;
+            }
+
+            // Match batch in tatc_web.batches
+            $batch_id = 0;
+            if (!empty($mr->schedule_id)) {
+                $ms = $DB->get_record('amto_schedules', ['id' => $mr->schedule_id]);
+                if ($ms) {
+                    $b_rows = $DB->get_records_sql("SELECT id FROM tatc_web.batches WHERE code = ? LIMIT 1", [$ms->batch_code]);
+                    if (!empty($b_rows)) {
+                        $batch_id = (int)reset($b_rows)->id;
+                    }
+                }
+            }
+            if ($batch_id === 0) {
+                $b_rows = $DB->get_records_sql("SELECT id FROM tatc_web.batches WHERE name LIKE ? OR code LIKE ? ORDER BY id ASC LIMIT 1", ['%' . $mr->program_name . '%', '%' . $mr->program_name . '%']);
+                if (!empty($b_rows)) {
+                    $batch_id = (int)reset($b_rows)->id;
+                } else {
+                    $any_b = $DB->get_records_sql("SELECT id FROM tatc_web.batches WHERE deleted_at IS NULL ORDER BY id ASC LIMIT 1");
+                    if (!empty($any_b)) {
+                        $batch_id = (int)reset($any_b)->id;
+                    }
+                }
+            }
+            if ($batch_id <= 0) {
+                continue;
+            }
+
+            $t_reg_stat = 'PENDING_VERIFICATION';
+            if ($mr->status === 'approved') {
+                $t_reg_stat = 'APPROVED';
+            } else if ($mr->status === 'rejected') {
+                $t_reg_stat = 'REJECTED';
+            }
+
+            $existing_treg = $DB->get_records_sql(
+                "SELECT id, status FROM tatc_web.participant_registrations WHERE participant_id = ? AND batch_id = ? LIMIT 1",
+                [$part_id, $batch_id]
+            );
+            if (empty($existing_treg)) {
+                $DB->execute(
+                    "INSERT INTO tatc_web.participant_registrations (participant_id, batch_id, status, total_amount, submitted_at, notes, created_at, updated_at)
+                     VALUES (?, ?, ?, 0.00, NOW(), ?, NOW(), NOW())",
+                    [$part_id, $batch_id, $t_reg_stat, $mr->admin_notes ?: 'Disinkronkan dari Modul Registrasi LMS AMTO']
+                );
+            } else {
+                $treg_row = reset($existing_treg);
+                if ($treg_row->status !== $t_reg_stat && $mr->status !== 'pending') {
+                    $DB->execute(
+                        "UPDATE tatc_web.participant_registrations SET status = ?, updated_at = NOW() WHERE id = ?",
+                        [$t_reg_stat, $treg_row->id]
+                    );
+                }
+            }
+
+            if ($mr->status === 'approved') {
+                $DB->execute(
+                    "INSERT IGNORE INTO tatc_web.batch_participants (batch_id, participant_id, status, enrolled_at)
+                     VALUES (?, ?, 'ENROLLED', NOW())",
+                    [$batch_id, $part_id]
+                );
+            }
+        }
+    } catch (Throwable $e) {
+        debugging('AMTO Cross-DB Sync warning: ' . $e->getMessage(), DEBUG_DEVELOPER);
     }
 }
 
@@ -266,15 +537,36 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
     }
 
     if ($target_user && $target_user->username !== 'admin') {
-        $moodle_role_short = 'student';
-        if ($tatc_role === 'INSTRUKTUR' || $tatc_role === 'INSTRUCTOR') {
-            $moodle_role_short = 'editingteacher';
-        } else if ($tatc_role === 'ADMIN') {
-            $moodle_role_short = 'manager';
-        }
-        $role_rec = $DB->get_record('role', ['shortname' => $moodle_role_short]);
-        if ($role_rec) {
-            role_assign($role_rec->id, $target_user->id, $syscontext->id);
+        $existing_roles = $DB->get_fieldset_sql(
+            "SELECT r.shortname FROM {role_assignments} ra JOIN {role} r ON r.id = ra.roleid WHERE ra.userid = ?",
+            [$target_user->id]
+        );
+        $email_role_map = [
+            'peserta@tatc.id'    => 'r01_trainee',
+            'instruktur@tatc.id' => 'r02_instructor',
+            'assessor@tatc.id'   => 'r03_assessor',
+            'tm@tatc.id'         => 'r04_trainingmanager',
+            'cert@tatc.id'       => 'r05_certofficer',
+            'qa@tatc.id'         => 'r06_qa',
+            'manajemen@tatc.id'  => 'r08_management',
+        ];
+        if (isset($email_role_map[$email])) {
+            $desired_short = $email_role_map[$email];
+            $role_rec = $DB->get_record('role', ['shortname' => $desired_short]);
+            if ($role_rec && !in_array($desired_short, $existing_roles, true)) {
+                role_assign($role_rec->id, $target_user->id, $syscontext->id);
+            }
+        } else if (empty($existing_roles)) {
+            $moodle_role_short = 'student';
+            if ($tatc_role === 'INSTRUKTUR' || $tatc_role === 'INSTRUCTOR') {
+                $moodle_role_short = 'editingteacher';
+            } else if ($tatc_role === 'ADMIN') {
+                $moodle_role_short = 'manager';
+            }
+            $role_rec = $DB->get_record('role', ['shortname' => $moodle_role_short]);
+            if ($role_rec) {
+                role_assign($role_rec->id, $target_user->id, $syscontext->id);
+            }
         }
     }
 
@@ -290,12 +582,23 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
 }
 
 /**
- * Automatically sync Moodle login session if the user logged in as a different account on tatcwebreact.
+ * Automatically sync Moodle login session if the user logged in or logged out on tatcwebreact.
  */
 function amto_auto_sync_from_tatc_cookie(): void {
-    global $USER, $FULLME;
+    global $USER;
     $cookie_data = amto_parse_tatc_session_cookie();
     if (!$cookie_data || empty($cookie_data['email'])) {
+        if (!empty($_SESSION['amto_last_tatc_token'])) {
+            unset($_SESSION['amto_last_tatc_token']);
+            if (isloggedin() && !isguestuser()) {
+                require_logout();
+                if (!defined('CLI_SCRIPT')) {
+                    $redirect_to = !empty($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '/login/index.php';
+                    header('Location: ' . $redirect_to);
+                    exit;
+                }
+            }
+        }
         return;
     }
     $token_raw = $_COOKIE['tatc_session'] ?? '';
@@ -314,6 +617,8 @@ function amto_auto_sync_from_tatc_cookie(): void {
         if ($tatc_email === 'admin@tatc.id' && $USER->username !== 'admin') {
             $need_switch = true;
         } else if ($tatc_email !== 'admin@tatc.id' && (strtolower($USER->email ?? '') !== $tatc_email || $USER->username === 'admin')) {
+            $need_switch = true;
+        } else if (strpos((string)($USER->lastname ?? ''), '(') === 0) {
             $need_switch = true;
         }
     }
@@ -348,6 +653,7 @@ function amto_current_role(): string {
  * [SEC-FIX-04] Determine granular 8-Role RBAC identity (R01 s/d R08).
  */
 function amto_current_rbac_role(): string {
+    amto_auto_sync_from_tatc_cookie();
     if (!isloggedin() || isguestuser()) {
         return 'guest';
     }
@@ -751,51 +1057,26 @@ HTML;
 }
 
 /**
- * Get detailed AMTO Role info (code, label, group) considering switched roles and real roles.
+ * Get detailed AMTO Role info (code, label, group) considering switched roles and all 8 RBAC roles (R01-R08).
  */
 function amto_get_detailed_role(): array {
-    global $USER, $DB;
-
-    $shortname = '';
-    if (!empty($USER->access['rsw']) && is_array($USER->access['rsw'])) {
-        $switchedroleid = end($USER->access['rsw']);
-        if ($switchedroleid && isset($DB)) {
-            $r = $DB->get_record('role', ['id' => $switchedroleid], 'shortname');
-            if ($r) {
-                $shortname = $r->shortname;
-            }
-        }
-    }
-
-    if ($shortname === '') {
-        if (function_exists('is_siteadmin') && is_siteadmin()) {
-            $shortname = 'admin';
-        } else if (!empty($USER->id) && isset($DB)) {
-            $roles = $DB->get_fieldset_sql(
-                "SELECT r.shortname FROM {role_assignments} ra JOIN {role} r ON r.id = ra.roleid WHERE ra.userid = ?",
-                [$USER->id]
-            );
-            foreach (['manager', 'certofficer', 'qa', 'editingteacher', 'teacher', 'student'] as $cand) {
-                if (in_array($cand, $roles, true)) {
-                    $shortname = $cand;
-                    break;
-                }
-            }
-        }
-    }
-
-    switch ($shortname) {
+    $rbac = amto_current_rbac_role();
+    switch ($rbac) {
         case 'admin':
             return ['code' => 'R07', 'label' => 'Administrator IT (Super Admin)', 'group' => 'admin'];
-        case 'manager':
+        case 'adminit':
+            return ['code' => 'R07', 'label' => 'Administrator IT AMTO', 'group' => 'admin'];
+        case 'trainingmanager':
             return ['code' => 'R04', 'label' => 'Training Manager AMTO', 'group' => 'admin'];
         case 'certofficer':
             return ['code' => 'R05', 'label' => 'Certification Officer AMTO', 'group' => 'admin'];
         case 'qa':
             return ['code' => 'R06', 'label' => 'Quality Assurance & Compliance (QA)', 'group' => 'qa'];
-        case 'editingteacher':
+        case 'management':
+            return ['code' => 'R08', 'label' => 'Manajemen Eksekutif AMTO', 'group' => 'admin'];
+        case 'instructor':
             return ['code' => 'R02', 'label' => 'Instruktur Pelatihan AMTO', 'group' => 'instructor'];
-        case 'teacher':
+        case 'assessor':
             return ['code' => 'R03', 'label' => 'Examiner / Assessor AMTO', 'group' => 'instructor'];
         default:
             return ['code' => 'R01', 'label' => 'Peserta Pelatihan / Trainee', 'group' => 'student'];
@@ -886,8 +1167,8 @@ function amto_render_operational_dashboard(): string {
                         <span>LMS Repository</span>
                     </a>
                 <?php elseif ($group === 'qa'): ?>
-                    <a href="/report/log/index.php" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:700;">
-                        <span>Buka Audit Trail (Logs)</span>
+                    <a href="/amto/audit_log.php" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:700;">
+                        <span>Buka Security &amp; Audit Trail</span>
                     </a>
                     <a href="/amto/repository.php" class="tatc-btn-outline" style="background:rgba(255,255,255,0.15); color:#ffffff !important; border-color:rgba(255,255,255,0.3);">
                         <span>Cek Revisi Dokumen Repository</span>

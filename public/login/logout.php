@@ -61,6 +61,8 @@ foreach ($authsequence as $authname) {
     $authplugin->logoutpage_hook();
 }
 
+unset($_SESSION['amto_last_tatc_token']);
+setcookie('tatc_session', '', time() - 3600, '/', '', false, true);
 require_logout();
 
 redirect($redirect);
