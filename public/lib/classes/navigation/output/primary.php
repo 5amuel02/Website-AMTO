@@ -307,6 +307,12 @@ class primary implements renderable, templatable {
                 . "-Validasi Bukti Kompetensi|/admin/tool/lp/competencyframeworks.php?pagecontextid=1";
         } else {
             $custommenuitems = $CFG->custommenuitems ?? '';
+            if (stripos($custommenuitems, '/amto/audit_log.php') === false) {
+                $custommenuitems = trim($custommenuitems) . "\nSecurity & Audit Trail|/amto/audit_log.php\n"
+                    . "-Matriks 8 Role RBAC & 15 Security UAT|/amto/audit_log.php\n"
+                    . "-Immutable Audit Log (LOG-01..09)|/amto/audit_log.php\n"
+                    . "-Diagnostik Database Terproteksi|/amto/test_db_view.php";
+            }
         }
 
         if (empty($custommenuitems)) {
