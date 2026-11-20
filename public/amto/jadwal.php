@@ -12,13 +12,18 @@ $PAGE->set_title('TATC Portal – Program & Jadwal Pelatihan AMTO');
 $PAGE->set_heading('Program & Jadwal Pelatihan AMTO');
 
 $role = amto_current_role();
+$rbac_role = amto_current_rbac_role();
+$can_manage_sched = in_array($rbac_role, ['admin', 'trainingmanager'], true);
 $action = optional_param('action', '', PARAM_ALPHANUMEXT);
 $cat_filter = optional_param('cat', 'all', PARAM_TEXT);
 $notice_msg = '';
 $notice_type = 'success';
 
-// 1. Handle Admin Actions: Add Schedule / Update Status / Delete Schedule
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin') {
+// 1. Handle Admin Actions: Add Schedule / Update Status / Soft-Delete (Void) Schedule
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage_sched) {
+    // [SEC-FIX-02] APP-01 CSRF Protection via Moodle sesskey validation
+    require_sesskey();
+
     if ($action === 'add_schedule') {
         $rec = new stdClass();
         $rec->batch_code = trim(optional_param('batch_code', '', PARAM_TEXT));
@@ -35,7 +40,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin') {
         $rec->timecreated = time();
 
         if ($rec->batch_code !== '' && $rec->program_name !== '') {
-            $DB->insert_record('amto_schedules', $rec);
+            $new_sched_id = $DB->insert_record('amto_schedules', $rec);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('SCHEDULE_CREATE', 'amto_schedules', (int)$new_sched_id, "batch={$rec->batch_code}", "Created training schedule {$rec->program_name} ({$rec->start_date} - {$rec->end_date})");
+            }
 
             // Sync to Moodle Calendar (mdl_event)
             $ev = new stdClass();
@@ -54,7 +62,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin') {
             $ev->timemodified = time();
             $DB->insert_record('event', $ev);
 
-            $notice_msg = "Jadwal Pelatihan <strong>{$rec->batch_code} – {$rec->program_name}</strong> berhasil ditambahkan dan disinkronkan ke Kalender Moodle.";
+            // [SEC-FIX-06] APP-01 Output encoding with s() to prevent Cross-Site Scripting (XSS)
+            $safe_batch = s($rec->batch_code);
+            $safe_prog  = s($rec->program_name);
+            $notice_msg = "Jadwal Pelatihan <strong>{$safe_batch} – {$safe_prog}</strong> berhasil ditambahkan dan disinkronkan ke Kalender Moodle.";
         } else {
             $notice_msg = 'Mohon isi Kode Batch dan Nama Program Pelatihan.';
             $notice_type = 'danger';
@@ -64,14 +75,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin') {
         $new_status = required_param('new_status', PARAM_TEXT);
         $sched = $DB->get_record('amto_schedules', ['id' => $sched_id]);
         if ($sched) {
+            $old_st = $sched->status;
             $sched->status = $new_status;
             $DB->update_record('amto_schedules', $sched);
-            $notice_msg = "Status jadwal <strong>{$sched->batch_code}</strong> diperbarui menjadi <strong>{$new_status}</strong>.";
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('SCHEDULE_STATUS_UPDATE', 'amto_schedules', $sched_id, "status: {$old_st} -> {$new_status}", "Updated batch {$sched->batch_code} status");
+            }
+            // [SEC-FIX-06] APP-01 Output encoding with s() to prevent Cross-Site Scripting (XSS)
+            $safe_batch  = s($sched->batch_code);
+            $safe_status = s($new_status);
+            $notice_msg  = "Status jadwal <strong>{$safe_batch}</strong> diperbarui menjadi <strong>{$safe_status}</strong>.";
         }
     } else if ($action === 'delete_schedule') {
         $sched_id = required_param('sched_id', PARAM_INT);
-        $DB->delete_records('amto_schedules', ['id' => $sched_id]);
-        $notice_msg = 'Jadwal pelatihan berhasil dihapus.';
+        $sched = $DB->get_record('amto_schedules', ['id' => $sched_id]);
+        if ($sched) {
+            // [SEC-FIX-04] SEC-05 Soft-Delete / Void instead of Hard Delete
+            $sched->status = 'Voided';
+            $DB->update_record('amto_schedules', $sched);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('SCHEDULE_VOID', 'amto_schedules', $sched_id, 'status=Voided', 'Schedule voided by ' . fullname($USER));
+            }
+        }
+        $notice_msg = 'Jadwal pelatihan telah ditandai VOID (Soft-Delete SEC-05) tanpa menghapus jejak histori.';
         $notice_type = 'warning';
     }
 }
@@ -190,6 +216,7 @@ echo amto_render_shared_styles();
             </div>
         </div>
         <form method="post" action="/amto/jadwal.php">
+            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
             <input type="hidden" name="action" value="add_schedule">
             <div class="tatc-form-grid mb-3">
                 <div>
@@ -340,6 +367,7 @@ echo amto_render_shared_styles();
                                             Lihat Pendaftar (<?php echo $reg_count; ?>)
                                         </a>
                                         <form method="post" action="/amto/jadwal.php" style="display:inline;" onsubmit="return confirm('Hapus jadwal batch ini?');">
+                                            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                             <input type="hidden" name="action" value="delete_schedule">
                                             <input type="hidden" name="sched_id" value="<?php echo $s->id; ?>">
                                             <button type="submit" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px; color:#b91c1c !important; border-color:#fecaca;">Hapus</button>

@@ -51,12 +51,19 @@ function amto_ensure_tables(): void {
             doc_pendukung VARCHAR(255) DEFAULT '',
             status VARCHAR(30) NOT NULL DEFAULT 'pending',
             admin_notes TEXT DEFAULT NULL,
+            created_by BIGINT(10) NOT NULL DEFAULT 0,
             verified_by BIGINT(10) NOT NULL DEFAULT 0,
             timecreated BIGINT(10) NOT NULL DEFAULT 0,
             timemodified BIGINT(10) NOT NULL DEFAULT 0,
             PRIMARY KEY (id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
         $DB->execute($sql);
+    } else {
+        // [SEC-FIX-04] SEC-03 Segregation of Duties: Ensure created_by column exists to prevent self-approval
+        $reg_cols = $DB->get_columns('amto_registrations');
+        if (!isset($reg_cols['created_by'])) {
+            $DB->execute("ALTER TABLE {amto_registrations} ADD COLUMN created_by BIGINT(10) NOT NULL DEFAULT 0 AFTER admin_notes");
+        }
     }
 
     // 3. Table: amto_repository (LMS Repository & Training Manuals per CASR Part 147)
@@ -70,6 +77,7 @@ function amto_ensure_tables(): void {
             file_type VARCHAR(60) NOT NULL DEFAULT 'PDF Training Manual',
             file_path VARCHAR(255) NOT NULL DEFAULT '',
             file_size VARCHAR(40) NOT NULL DEFAULT '',
+            file_hash VARCHAR(64) NOT NULL DEFAULT '',
             doc_version VARCHAR(50) NOT NULL DEFAULT 'Rev. 01 - 2026',
             description TEXT DEFAULT NULL,
             uploaded_by BIGINT(10) NOT NULL DEFAULT 0,
@@ -79,6 +87,61 @@ function amto_ensure_tables(): void {
             PRIMARY KEY (id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
         $DB->execute($sql);
+    } else {
+        // [SEC-FIX-03] DP-09 Ensure SHA-256 file_hash column exists for document integrity
+        $cols = $DB->get_columns('amto_repository');
+        if (!isset($cols['file_hash'])) {
+            $DB->execute("ALTER TABLE {amto_repository} ADD COLUMN file_hash VARCHAR(64) NOT NULL DEFAULT '' AFTER file_size");
+        }
+    }
+
+    // 4. Table: amto_audit_logs (Immutable Security Audit Trail per SEC-05 & LOG-01 s/d LOG-09)
+    if (!$dbman->table_exists('amto_audit_logs')) {
+        $sql = "CREATE TABLE {amto_audit_logs} (
+            id BIGINT(10) NOT NULL AUTO_INCREMENT,
+            event_code VARCHAR(60) NOT NULL,
+            target_table VARCHAR(60) NOT NULL,
+            target_id BIGINT(10) NOT NULL DEFAULT 0,
+            actor_userid BIGINT(10) NOT NULL DEFAULT 0,
+            actor_username VARCHAR(100) NOT NULL DEFAULT 'guest',
+            actor_role VARCHAR(50) NOT NULL DEFAULT 'guest',
+            ip_address VARCHAR(64) NOT NULL DEFAULT '',
+            change_summary VARCHAR(255) NOT NULL DEFAULT '',
+            details TEXT DEFAULT NULL,
+            timecreated BIGINT(10) NOT NULL DEFAULT 0,
+            PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        $DB->execute($sql);
+    }
+}
+
+/**
+ * [SEC-FIX-05] SEC-05 & LOG-01..LOG-09: Append-only Security Audit Trail logger.
+ */
+function amto_log_audit_event(
+    string $event_code,
+    string $target_table,
+    int $target_id,
+    string $change_summary,
+    string $details = ''
+): void {
+    global $DB, $USER;
+    try {
+        $rec = new stdClass();
+        $rec->event_code     = strtoupper(trim($event_code));
+        $rec->target_table   = trim($target_table);
+        $rec->target_id      = $target_id;
+        $rec->actor_userid   = (!empty($USER->id) && isloggedin() && !isguestuser()) ? (int)$USER->id : 0;
+        $rec->actor_username = (!empty($USER->username) && isloggedin() && !isguestuser()) ? (string)$USER->username : 'guest';
+        $rec->actor_role     = function_exists('amto_current_rbac_role') ? amto_current_rbac_role() : 'guest';
+        $rec->ip_address     = function_exists('getremoteaddr') ? (string)getremoteaddr() : ($_SERVER['REMOTE_ADDR'] ?? '');
+        $rec->change_summary = substr($change_summary, 0, 250);
+        $rec->details        = $details;
+        $rec->timecreated    = time();
+        $DB->insert_record('amto_audit_logs', $rec);
+    } catch (Throwable $e) {
+        // Prevent logging exception from breaking transaction flow while preserving error log
+        debugging('AMTO Audit Log Error: ' . $e->getMessage(), DEBUG_DEVELOPER);
     }
 }
 
@@ -263,6 +326,140 @@ function amto_current_role(): string {
         return amto_get_effective_role();
     }
     return is_siteadmin() ? 'admin' : 'student';
+}
+
+/**
+ * [SEC-FIX-04] Determine granular 8-Role RBAC identity (R01 s/d R08).
+ */
+function amto_current_rbac_role(): string {
+    if (!isloggedin() || isguestuser()) {
+        return 'guest';
+    }
+    if (function_exists('amto_get_granular_rbac_role')) {
+        return amto_get_granular_rbac_role();
+    }
+    return is_siteadmin() ? 'admin' : 'student';
+}
+
+/**
+ * [SEC-FIX-04] Official 8-Role Catalogue per Form Kesepakatan Security & RBAC Website AMTO.
+ */
+function amto_get_rbac_catalogue(): array {
+    return [
+        'student'         => ['id' => 'R01', 'shortname' => 'r01_trainee',         'name' => 'Peserta / Trainee (R01)',         'scope' => 'SCP-01: Hanya data milik sendiri'],
+        'instructor'      => ['id' => 'R02', 'shortname' => 'r02_instructor',      'name' => 'Instruktur (R02)',                'scope' => 'SCP-02: Kelas & materi penugasan'],
+        'assessor'        => ['id' => 'R03', 'shortname' => 'r03_assessor',        'name' => 'Examiner / Assessor (R03)',       'scope' => 'SCP-03: Ujian & assessment otorisasi'],
+        'trainingmanager' => ['id' => 'R04', 'shortname' => 'r04_trainingmanager', 'name' => 'Training Manager (R04)',          'scope' => 'SCP-04: Program, jadwal & verifikasi peserta'],
+        'certofficer'     => ['id' => 'R05', 'shortname' => 'r05_certofficer',     'name' => 'Certification Officer (R05)',     'scope' => 'SCP-05: Verifikasi berkas & sertifikasi'],
+        'qa'              => ['id' => 'R06', 'shortname' => 'r06_qa',              'name' => 'Quality Assurance / QA (R06)',    'scope' => 'SCP-06: Read-Only Audit & dokumen terkendali'],
+        'adminit'         => ['id' => 'R07', 'shortname' => 'r07_adminit',         'name' => 'Administrator IT (R07)',          'scope' => 'SCP-08: Akun & teknis (dilarang ubah nilai/sertifikat)'],
+        'management'      => ['id' => 'R08', 'shortname' => 'r08_management',      'name' => 'Manajemen AMTO (R08)',            'scope' => 'SCP-07: Dashboard agregat & persetujuan'],
+        'admin'           => ['id' => 'R04/R07', 'shortname' => 'admin',           'name' => 'Super Admin / Training Mgr',      'scope' => 'Akses penuh dengan kontrol SoD & Audit Trail'],
+    ];
+}
+
+/**
+ * [SEC-FIX-04] SEC-01, SEC-02, SEC-04 (Deny by Default):
+ * Check granular permission against the 8-Role RBAC Matrix.
+ */
+function amto_has_permission(string $module, string $action): bool {
+    $rbac = amto_current_rbac_role();
+    if ($rbac === 'admin') {
+        return true;
+    }
+    $matrix = [
+        'registrasi' => [
+            'student'         => ['read_own', 'create'],
+            'instructor'      => ['read_limited'],
+            'assessor'        => ['read_limited'],
+            'trainingmanager' => ['read_all', 'create', 'update', 'approve', 'reject', 'void'],
+            'certofficer'     => ['read_all', 'verify', 'approve', 'reject'],
+            'qa'              => ['read_audit'],
+            'adminit'         => ['read_tech'],
+            'management'      => ['read_aggregate'],
+            'guest'           => ['create', 'read_search_masked'],
+        ],
+        'jadwal' => [
+            'student'         => ['read_own'],
+            'instructor'      => ['read_assigned'],
+            'assessor'        => ['read_assigned'],
+            'trainingmanager' => ['read_all', 'create', 'update', 'void'],
+            'certofficer'     => ['read_all'],
+            'qa'              => ['read_audit'],
+            'adminit'         => ['read_tech'],
+            'management'      => ['read_aggregate'],
+            'guest'           => ['read_all'],
+        ],
+        'repository' => [
+            'student'         => ['read', 'download'],
+            'instructor'      => ['read', 'download', 'create', 'update'],
+            'assessor'        => ['read', 'download'],
+            'trainingmanager' => ['read', 'download', 'create', 'update', 'approve', 'void'],
+            'certofficer'     => ['read', 'download'],
+            'qa'              => ['read_audit', 'download', 'approve', 'void'],
+            'adminit'         => ['read_tech'],
+            'management'      => ['read_aggregate'],
+            'guest'           => [],
+        ],
+        'audit_log' => [
+            'trainingmanager' => ['read_limited'],
+            'certofficer'     => ['read_limited'],
+            'qa'              => ['read_all', 'export'],
+            'adminit'         => ['read_tech'],
+            'management'      => ['read_summary'],
+        ],
+    ];
+    $allowed = $matrix[$module][$rbac] ?? [];
+    return in_array($action, $allowed, true);
+}
+
+/**
+ * [SEC-FIX-04] SEC-03 Segregation of Duties (SoD):
+ * Prevent self-approval when the creator of a transaction attempts to approve it themselves.
+ */
+function amto_check_sod_approval(int $creator_userid, int $approver_userid): bool {
+    if ($creator_userid <= 0 || $approver_userid <= 0) {
+        return true; // Self-registration by external guest (userid=0) can be approved by authorized staff
+    }
+    return $creator_userid !== $approver_userid;
+}
+
+/**
+ * [SEC-FIX-06] DP-01, DP-02 & SCP-07: Mask NIK KTP (16 digits) for Guest search & Management aggregate views.
+ */
+function amto_mask_nik(string $nik): string {
+    $clean = trim($nik);
+    $len = strlen($clean);
+    if ($len <= 6) {
+        return str_repeat('*', max(4, $len));
+    }
+    return substr($clean, 0, 4) . str_repeat('*', $len - 7) . substr($clean, -3);
+}
+
+/**
+ * [SEC-FIX-06] DP-01 & SCP-07: Mask Phone number for Guest search & Management aggregate views.
+ */
+function amto_mask_phone(string $phone): string {
+    $clean = trim($phone);
+    $len = strlen($clean);
+    if ($len <= 5) {
+        return str_repeat('*', max(4, $len));
+    }
+    return substr($clean, 0, 4) . str_repeat('*', $len - 6) . substr($clean, -2);
+}
+
+/**
+ * [SEC-FIX-06] DP-01 & SCP-07: Mask Email address for Guest status check.
+ */
+function amto_mask_email(string $email): string {
+    $parts = explode('@', trim($email), 2);
+    if (count($parts) !== 2) {
+        return '***';
+    }
+    $local = $parts[0];
+    $domain = $parts[1];
+    $prefix = substr($local, 0, min(2, strlen($local)));
+    return $prefix . '***@' . $domain;
 }
 
 /**

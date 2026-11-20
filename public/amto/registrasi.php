@@ -14,6 +14,9 @@ $PAGE->set_title('TATC Portal – Data & Verifikasi Registrasi Peserta AMTO');
 $PAGE->set_heading('Data & Verifikasi Registrasi Peserta');
 
 $role = amto_current_role();
+$rbac_role = amto_current_rbac_role();
+$can_verify_reg = in_array($rbac_role, ['admin', 'trainingmanager', 'certofficer'], true);
+$is_audit_readonly = in_array($rbac_role, ['qa', 'management', 'adminit'], true);
 $notice_msg = '';
 $notice_type = 'success';
 
@@ -33,27 +36,45 @@ if ($admin_msg !== '') {
     $notice_type = 'success';
 }
 
-// Helper to handle secure file upload (PDF/JPG/PNG max 5MB per Security Agreement)
+// Helper to handle secure file upload (PDF/JPG/PNG max 5MB per Security Agreement DP-06 & APP-06)
 function amto_save_uploaded_doc(string $field, string $regno): string {
     if (empty($_FILES[$field]['name']) || $_FILES[$field]['error'] !== UPLOAD_ERR_OK) {
         return '';
     }
     $allowed_ext = ['pdf', 'jpg', 'jpeg', 'png'];
-    $orig_name = $_FILES[$field]['name'];
+    $allowed_mimes = ['application/pdf', 'image/jpeg', 'image/png'];
+    $orig_name = basename((string)$_FILES[$field]['name']);
     $ext = strtolower(pathinfo($orig_name, PATHINFO_EXTENSION));
     if (!in_array($ext, $allowed_ext, true)) {
         return '';
     }
-    if ($_FILES[$field]['size'] > 5 * 1024 * 1024) {
+    if ($_FILES[$field]['size'] <= 0 || $_FILES[$field]['size'] > 5 * 1024 * 1024) {
         return '';
+    }
+    // [SEC-FIX-03] DP-06 & APP-06: Validate actual file magic bytes / MIME type using finfo
+    $tmp_path = $_FILES[$field]['tmp_name'];
+    if (!is_uploaded_file($tmp_path)) {
+        return '';
+    }
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $real_mime = $finfo ? finfo_file($finfo, $tmp_path) : '';
+        if ($finfo) {
+            finfo_close($finfo);
+        }
+        if (!in_array($real_mime, $allowed_mimes, true)) {
+            return '';
+        }
     }
     $upload_dir = __DIR__ . '/uploads';
     if (!is_dir($upload_dir)) {
-        mkdir($upload_dir, 0775, true);
+        mkdir($upload_dir, 0750, true);
     }
-    $safe_name = strtolower($regno . '_' . $field . '_' . time() . '.' . $ext);
+    $clean_regno = preg_replace('/[^a-zA-Z0-9_-]/', '', strtolower($regno));
+    $clean_field = preg_replace('/[^a-zA-Z0-9_-]/', '', strtolower($field));
+    $safe_name = $clean_regno . '_' . $clean_field . '_' . time() . '.' . $ext;
     $dest = $upload_dir . '/' . $safe_name;
-    if (move_uploaded_file($_FILES[$field]['tmp_name'], $dest)) {
+    if (move_uploaded_file($tmp_path, $dest)) {
         return '/amto/uploads/' . $safe_name;
     }
     return '';
@@ -61,6 +82,9 @@ function amto_save_uploaded_doc(string $field, string $regno): string {
 
 // 1. Handle Registration Form Submission (Only for Guest / New Applicant or Admin Manual Input)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
+    // [SEC-FIX-02] APP-01 CSRF Protection via Moodle sesskey validation
+    require_sesskey();
+
     $fullname = trim(optional_param('fullname', '', PARAM_TEXT));
     $username = strtolower(trim(optional_param('username', '', PARAM_USERNAME)));
     $nik = trim(optional_param('nik', '', PARAM_TEXT));
@@ -120,11 +144,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
         $record->doc_pendukung = $doc_pendukung;
         $record->status = 'pending';
         $record->admin_notes = 'Menunggu verifikasi berkas prasyarat oleh Admin / Training Manager.';
+        $record->created_by = (isloggedin() && !isguestuser()) ? (int)$USER->id : 0;
         $record->verified_by = 0;
         $record->timecreated = time();
         $record->timemodified = time();
 
-        $DB->insert_record('amto_registrations', $record);
+        $new_reg_id = $DB->insert_record('amto_registrations', $record);
+        if (function_exists('amto_log_audit_event')) {
+            amto_log_audit_event('REGISTRATION_CREATE', 'amto_registrations', (int)$new_reg_id, "reg_no={$reg_no}, status=pending", "New participant registration submitted for username={$username}, program={$prog_name}");
+        }
 
         if ($role === 'admin') {
             header('Location: /amto/registrasi.php?admin_msg=' . urlencode("Data pendaftar baru {$reg_no} ({$fullname}) berhasil ditambahkan."));
@@ -135,19 +163,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
     }
 }
 
-// 2. Handle Admin Approval / Rejection / Deletion
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin' && in_array($action, ['approve', 'reject', 'delete'], true)) {
+// 2. Handle Admin Approval / Rejection / Soft-Delete (Void) with RBAC & SoD enforcement
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_verify_reg && in_array($action, ['approve', 'reject', 'delete'], true)) {
+    // [SEC-FIX-02] APP-01 CSRF Protection on critical state-changing actions
+    require_sesskey();
+
     $regid = required_param('regid', PARAM_INT);
     $notes = trim(optional_param('admin_notes', '', PARAM_TEXT));
     $reg = $DB->get_record('amto_registrations', ['id' => $regid]);
 
     if ($reg) {
         if ($action === 'delete') {
-            $DB->delete_records('amto_registrations', ['id' => $regid]);
-            $msg = "Data pendaftaran {$reg->registration_no} ({$reg->fullname}) berhasil dihapus.";
+            // [SEC-FIX-04] SEC-05 & Bab 3/7 Form Kesepakatan RBAC: No Hard Delete on transaction records; use Soft Delete / Void
+            $reg->status = 'void';
+            $void_reason = $notes !== '' ? $notes : 'Dibatalkan (Void) oleh pejabat berwenang dengan jejak audit tetap tersimpan.';
+            $reg->admin_notes = '[VOID oleh ' . fullname($USER) . ' pada ' . date('Y-m-d H:i') . '] ' . $void_reason;
+            $reg->verified_by = $USER->id;
+            $reg->timemodified = time();
+            $DB->update_record('amto_registrations', $reg);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('REGISTRATION_VOID', 'amto_registrations', $regid, 'status=void', $reg->admin_notes);
+            }
+            $msg = "Data pendaftaran {$reg->registration_no} ({$reg->fullname}) telah ditandai VOID (Soft-Delete SEC-05) tanpa menghapus jejak audit.";
             header('Location: /amto/registrasi.php?admin_msg=' . urlencode($msg));
             exit;
         } else if ($action === 'approve') {
+            // [SEC-FIX-04] SEC-03 Segregation of Duties (SoD): Prevent self-approval if staff created the record manually
+            if (!amto_check_sod_approval((int)($reg->created_by ?? 0), (int)$USER->id)) {
+                if (function_exists('amto_log_audit_event')) {
+                    amto_log_audit_event('SOD_VIOLATION_BLOCKED', 'amto_registrations', $regid, 'Self-Approval Blocked', 'User attempted to approve registration created by themselves');
+                }
+                $notice_msg = 'Pelanggaran Segregation of Duties (SEC-03): Akun yang menginput pendaftaran manual tidak boleh menyetujui (Self-Approve) transaksi yang dibuatnya sendiri. Mohon gunakan akun verifikator independen.';
+                $notice_type = 'danger';
+            } else {
             $existing = $DB->get_record('user', [
                 'username' => $reg->username,
                 'mnethostid' => $CFG->mnet_localhost_id,
@@ -224,16 +272,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $role === 'admin' && in_array($acti
             $reg->verified_by = $USER->id;
             $reg->timemodified = time();
             $DB->update_record('amto_registrations', $reg);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('REGISTRATION_APPROVE', 'amto_registrations', $regid, 'status: pending -> approved', "Approved registration {$reg->registration_no} ({$reg->username}), linked Moodle userid={$target_userid}");
+            }
 
             $msg = "Pendaftaran {$reg->registration_no} ({$reg->fullname}) telah DISETUJUI. Akun LMS (username: {$reg->username}) sudah aktif dan siap digunakan login!";
             header('Location: /amto/registrasi.php?admin_msg=' . urlencode($msg));
             exit;
+            }
         } else {
+            $old_status = $reg->status;
             $reg->status = 'rejected';
             $reg->admin_notes = $notes !== '' ? $notes : 'Berkas prasyarat belum sesuai/kurang jelas. Mohon unggah ulang dokumen yang valid.';
             $reg->verified_by = $USER->id;
             $reg->timemodified = time();
             $DB->update_record('amto_registrations', $reg);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('REGISTRATION_REJECT', 'amto_registrations', $regid, "status: {$old_status} -> rejected", $reg->admin_notes);
+            }
 
             $msg = "Pendaftaran {$reg->registration_no} ({$reg->fullname}) telah ditandai Perlu Revisi / Ditolak.";
             header('Location: /amto/registrasi.php?admin_msg=' . urlencode($msg));
@@ -411,6 +467,7 @@ echo amto_render_shared_styles();
             </div>
             <?php if ($role === 'admin'): ?>
             <div class="d-flex gap-2">
+                <a href="/amto/audit_log.php" class="tatc-btn-outline" style="border-color:#fca5a5; color:#b91c1c !important;">🛡️ Audit Trail &amp; RBAC</a>
                 <a href="/admin/user.php" class="tatc-btn-outline">Daftar Akun Moodle</a>
                 <a href="/cohort/index.php" class="tatc-btn-outline">Lihat Cohort / Angkatan</a>
             </div>
@@ -454,12 +511,19 @@ echo amto_render_shared_styles();
                                     </div>
                                 </td>
                                 <td>
+                                    <?php
+                                    // [SEC-FIX-06] DP-01, SCP-01 & SCP-07: Mask sensitive PII (NIK, Phone, Email) for unauthenticated Guest & Management aggregate role
+                                    $should_mask_pii = ($role === 'guest' || $rbac_role === 'management');
+                                    $disp_nik   = $should_mask_pii ? amto_mask_nik((string)$r->nik) : (string)$r->nik;
+                                    $disp_phone = $should_mask_pii ? amto_mask_phone((string)$r->phone) : (string)$r->phone;
+                                    $disp_email = ($role === 'guest') ? amto_mask_email((string)$r->email) : (string)$r->email;
+                                    ?>
                                     <div style="font-weight:700; color:#0f172a;"><?php echo s($r->fullname); ?></div>
                                     <div style="font-size:12px; color:#64748b;">
-                                        Username: <code><?php echo s($r->username); ?></code> &bull; NIK: <?php echo s($r->nik); ?>
+                                        Username: <code><?php echo s($r->username); ?></code> &bull; NIK: <?php echo s($disp_nik); ?>
                                     </div>
                                     <div style="font-size:12px; color:#64748b;">
-                                        <?php echo s($r->email); ?> &bull; <?php echo s($r->phone); ?>
+                                        <?php echo s($disp_email); ?> &bull; <?php echo s($disp_phone); ?>
                                     </div>
                                 </td>
                                 <td>
@@ -474,17 +538,21 @@ echo amto_render_shared_styles();
                                     <div style="font-weight:600; color:#0f172a; max-width:250px;"><?php echo s($r->program_name); ?></div>
                                 </td>
                                 <td>
-                                    <?php if (!empty($r->doc_ktp)): ?>
-                                        <a href="<?php echo s($r->doc_ktp); ?>" target="_blank" class="tatc-doc-pill">KTP</a>
-                                    <?php endif; ?>
-                                    <?php if (!empty($r->doc_ijazah)): ?>
-                                        <a href="<?php echo s($r->doc_ijazah); ?>" target="_blank" class="tatc-doc-pill">Ijazah</a>
-                                    <?php endif; ?>
-                                    <?php if (!empty($r->doc_pendukung)): ?>
-                                        <a href="<?php echo s($r->doc_pendukung); ?>" target="_blank" class="tatc-doc-pill">Surat/Foto</a>
-                                    <?php endif; ?>
-                                    <?php if (empty($r->doc_ktp) && empty($r->doc_ijazah) && empty($r->doc_pendukung)): ?>
-                                        <span style="font-size:12px; color:#94a3b8;">Belum unggah file</span>
+                                    <?php if ($role !== 'guest' && isloggedin() && !isguestuser()): ?>
+                                        <?php if (!empty($r->doc_ktp)): ?>
+                                            <a href="/amto/download.php?type=reg&amp;id=<?php echo (int)$r->id; ?>&amp;doc=ktp" target="_blank" class="tatc-doc-pill">KTP</a>
+                                        <?php endif; ?>
+                                        <?php if (!empty($r->doc_ijazah)): ?>
+                                            <a href="/amto/download.php?type=reg&amp;id=<?php echo (int)$r->id; ?>&amp;doc=ijazah" target="_blank" class="tatc-doc-pill">Ijazah</a>
+                                        <?php endif; ?>
+                                        <?php if (!empty($r->doc_pendukung)): ?>
+                                            <a href="/amto/download.php?type=reg&amp;id=<?php echo (int)$r->id; ?>&amp;doc=pendukung" target="_blank" class="tatc-doc-pill">Surat/Foto</a>
+                                        <?php endif; ?>
+                                        <?php if (empty($r->doc_ktp) && empty($r->doc_ijazah) && empty($r->doc_pendukung)): ?>
+                                            <span style="font-size:12px; color:#94a3b8;">Belum unggah file</span>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <span class="tatc-doc-pill" title="DP-07: Login untuk mengakses dokumen terproteksi">🔒 Terlindungi (DP-07)</span>
                                     <?php endif; ?>
                                 </td>
                                 <td>
@@ -492,6 +560,8 @@ echo amto_render_shared_styles();
                                         <span class="tatc-badge tatc-badge-approved">Disetujui &amp; Aktif</span>
                                     <?php elseif ($r->status === 'rejected'): ?>
                                         <span class="tatc-badge tatc-badge-rejected">Perlu Revisi / Ditolak</span>
+                                    <?php elseif ($r->status === 'void'): ?>
+                                        <span class="tatc-badge tatc-badge-rejected" style="background:#e2e8f0; color:#475569;">VOID (Soft-Deleted)</span>
                                     <?php else: ?>
                                         <span class="tatc-badge tatc-badge-pending">Menunggu Verifikasi</span>
                                     <?php endif; ?>
@@ -503,9 +573,13 @@ echo amto_render_shared_styles();
                                 </td>
                                 <?php if ($role === 'admin'): ?>
                                 <td>
+                                    <?php if ($is_audit_readonly): ?>
+                                        <span class="tatc-doc-pill" title="SCP-06 / SCP-08: Role Anda bersifat Read-Only Audit / Teknis">🔍 Read-Only (<?php echo s(strtoupper($rbac_role)); ?>)</span>
+                                    <?php else: ?>
                                     <div class="d-flex flex-wrap gap-1">
-                                        <?php if ($r->status !== 'approved'): ?>
+                                        <?php if ($r->status !== 'approved' && $r->status !== 'void'): ?>
                                         <form method="post" action="/amto/registrasi.php" style="display:inline;">
+                                            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                             <input type="hidden" name="action" value="approve">
                                             <input type="hidden" name="regid" value="<?php echo $r->id; ?>">
                                             <button type="submit" class="tatc-btn-red" style="padding:6px 12px; font-size:12px;">
@@ -513,8 +587,9 @@ echo amto_render_shared_styles();
                                             </button>
                                         </form>
                                         <?php endif; ?>
-                                        <?php if ($r->status !== 'rejected'): ?>
+                                        <?php if ($r->status !== 'rejected' && $r->status !== 'void'): ?>
                                         <form method="post" action="/amto/registrasi.php" style="display:inline;">
+                                            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                             <input type="hidden" name="action" value="reject">
                                             <input type="hidden" name="regid" value="<?php echo $r->id; ?>">
                                             <button type="submit" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px; color:#b91c1c !important; border-color:#fecaca;">
@@ -522,14 +597,18 @@ echo amto_render_shared_styles();
                                             </button>
                                         </form>
                                         <?php endif; ?>
-                                        <form method="post" action="/amto/registrasi.php" style="display:inline;" onsubmit="return confirm('Hapus data pendaftaran ini?');">
+                                        <?php if ($r->status !== 'void'): ?>
+                                        <form method="post" action="/amto/registrasi.php" style="display:inline;" onsubmit="return confirm('Tandai pendaftaran ini sebagai VOID (Soft-Delete sesuai SEC-05)?');">
+                                            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                             <input type="hidden" name="action" value="delete">
                                             <input type="hidden" name="regid" value="<?php echo $r->id; ?>">
                                             <button type="submit" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px;">
-                                                Hapus
+                                                Void
                                             </button>
                                         </form>
+                                        <?php endif; ?>
                                     </div>
+                                    <?php endif; ?>
                                 </td>
                                 <?php else: ?>
                                 <td>
@@ -569,6 +648,7 @@ echo amto_render_shared_styles();
         </div>
 
         <form method="post" action="/amto/registrasi.php" enctype="multipart/form-data">
+            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
             <input type="hidden" name="action" value="register">
 
             <div class="tatc-form-grid mb-3">

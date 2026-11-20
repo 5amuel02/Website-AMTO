@@ -14,7 +14,8 @@ $PAGE->set_title('TATC Portal – LMS Repository & Modul Materi AMTO');
 $PAGE->set_heading('LMS Repository & Modul Materi Pelatihan');
 
 $role = amto_current_role();
-$can_manage = in_array($role, ['admin', 'instructor'], true);
+$rbac_role = amto_current_rbac_role();
+$can_manage = in_array($rbac_role, ['admin', 'trainingmanager', 'instructor', 'qa'], true);
 
 $action = optional_param('action', '', PARAM_ALPHANUMEXT);
 $cat_filter = optional_param('cat', 'all', PARAM_TEXT);
@@ -23,38 +24,68 @@ $msg = optional_param('msg', '', PARAM_TEXT);
 $notice_msg = $msg !== '' ? s($msg) : '';
 $notice_type = 'success';
 
-// Helper to handle secure repository file upload
+// Helper to handle secure repository file upload with MIME validation & SHA-256 Checksum (DP-06, DP-09, APP-06)
 function amto_save_repo_file(string $modcode): array {
     if (empty($_FILES['repo_file']['name']) || $_FILES['repo_file']['error'] !== UPLOAD_ERR_OK) {
-        return ['path' => '', 'size' => ''];
+        return ['path' => '', 'size' => '', 'hash' => ''];
     }
     $allowed_ext = ['pdf', 'ppt', 'pptx', 'doc', 'docx', 'mp4', 'zip', 'png', 'jpg'];
-    $orig_name = $_FILES['repo_file']['name'];
+    $allowed_mimes = [
+        'application/pdf',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'video/mp4',
+        'application/zip',
+        'application/x-zip-compressed',
+        'image/png',
+        'image/jpeg',
+    ];
+    $orig_name = basename((string)$_FILES['repo_file']['name']);
     $ext = strtolower(pathinfo($orig_name, PATHINFO_EXTENSION));
     if (!in_array($ext, $allowed_ext, true)) {
-        return ['path' => '', 'size' => ''];
+        return ['path' => '', 'size' => '', 'hash' => ''];
     }
     $bytes = (int)$_FILES['repo_file']['size'];
-    if ($bytes > 25 * 1024 * 1024) {
-        return ['path' => '', 'size' => ''];
+    if ($bytes <= 0 || $bytes > 25 * 1024 * 1024) {
+        return ['path' => '', 'size' => '', 'hash' => ''];
+    }
+    $tmp_path = $_FILES['repo_file']['tmp_name'];
+    if (!is_uploaded_file($tmp_path)) {
+        return ['path' => '', 'size' => '', 'hash' => ''];
+    }
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $real_mime = $finfo ? finfo_file($finfo, $tmp_path) : '';
+        if ($finfo) {
+            finfo_close($finfo);
+        }
+        if (!in_array($real_mime, $allowed_mimes, true)) {
+            return ['path' => '', 'size' => '', 'hash' => ''];
+        }
     }
     $upload_dir = __DIR__ . '/repository_files';
     if (!is_dir($upload_dir)) {
-        mkdir($upload_dir, 0775, true);
+        mkdir($upload_dir, 0750, true);
     }
     $clean_code = preg_replace('/[^a-zA-Z0-9_-]/', '_', strtolower($modcode));
     $safe_name = $clean_code . '_' . time() . '.' . $ext;
     $dest = $upload_dir . '/' . $safe_name;
-    if (move_uploaded_file($_FILES['repo_file']['tmp_name'], $dest)) {
+    if (move_uploaded_file($tmp_path, $dest)) {
         $size_kb = round($bytes / 1024, 1);
         $size_str = $size_kb >= 1024 ? round($size_kb / 1024, 2) . ' MB' : $size_kb . ' KB';
-        return ['path' => '/amto/repository_files/' . $safe_name, 'size' => $size_str];
+        $sha256 = hash_file('sha256', $dest) ?: '';
+        return ['path' => '/amto/repository_files/' . $safe_name, 'size' => $size_str, 'hash' => $sha256];
     }
-    return ['path' => '', 'size' => ''];
+    return ['path' => '', 'size' => '', 'hash' => ''];
 }
 
 // Handle Upload / Delete Actions (for Admin & Instructor only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage) {
+    // [SEC-FIX-02] APP-01 CSRF Protection via Moodle sesskey validation
+    require_sesskey();
+
     if ($action === 'upload_module') {
         $module_code = strtoupper(trim(optional_param('module_code', '', PARAM_TEXT)));
         $title = trim(optional_param('title', '', PARAM_TEXT));
@@ -75,6 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage) {
             $rec->file_type = $file_type;
             $rec->file_path = $upload_res['path'];
             $rec->file_size = $upload_res['size'] ?: 'Dokumen Digital';
+            $rec->file_hash = $upload_res['hash'] ?? '';
             $rec->doc_version = $doc_version ?: 'Rev. 01 - 2026';
             $rec->description = $description;
             $rec->uploaded_by = $USER->id;
@@ -82,7 +114,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage) {
             $rec->status = 'Published';
             $rec->timecreated = time();
 
-            $DB->insert_record('amto_repository', $rec);
+            $new_mod_id = $DB->insert_record('amto_repository', $rec);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('REPO_MODULE_UPLOAD', 'amto_repository', (int)$new_mod_id, "module={$module_code}, ver={$rec->doc_version}", "Uploaded training manual {$title}, SHA256=" . ($rec->file_hash ?: 'none'));
+            }
 
             $m = "Modul [{$module_code}] {$title} berhasil ditambahkan ke LMS Repository AMTO.";
             header('Location: /amto/repository.php?msg=' . urlencode($m));
@@ -95,8 +130,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage) {
         $mod_id = required_param('mod_id', PARAM_INT);
         $mod = $DB->get_record('amto_repository', ['id' => $mod_id]);
         if ($mod) {
-            $DB->delete_records('amto_repository', ['id' => $mod_id]);
-            $m = "Modul [{$mod->module_code}] {$mod->title} berhasil dihapus dari Repository.";
+            // [SEC-FIX-04] SEC-05 Soft-Delete / Void instead of Hard Delete
+            $mod->status = 'Voided';
+            $DB->update_record('amto_repository', $mod);
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('REPO_MODULE_VOID', 'amto_repository', $mod_id, 'status=Voided', "Module [{$mod->module_code}] voided by " . fullname($USER));
+            }
+            $m = "Modul [{$mod->module_code}] {$mod->title} telah ditandai VOID (Soft-Delete SEC-05).";
             header('Location: /amto/repository.php?msg=' . urlencode($m));
             exit;
         }
@@ -235,6 +275,7 @@ echo amto_render_shared_styles();
         </div>
 
         <form method="post" action="/amto/repository.php" enctype="multipart/form-data">
+            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
             <input type="hidden" name="action" value="upload_module">
 
             <div class="tatc-form-grid mb-3">
@@ -367,6 +408,11 @@ echo amto_render_shared_styles();
                                 <td>
                                     <span class="tatc-doc-pill"><?php echo s($m->file_type); ?></span>
                                     <div style="font-size:11.5px; color:#64748b; margin-top:2px;"><?php echo s($m->file_size); ?></div>
+                                    <?php if (!empty($m->file_hash)): ?>
+                                        <div style="font-size:10.5px; color:#15803d; font-family:monospace; margin-top:2px;" title="SHA-256: <?php echo s($m->file_hash); ?>">
+                                            ✓ SHA256: <?php echo s(substr($m->file_hash, 0, 10)); ?>...
+                                        </div>
+                                    <?php endif; ?>
                                 </td>
                                 <td>
                                     <div style="font-weight:600; font-size:12.5px;"><?php echo s($m->uploader_name); ?></div>
@@ -375,7 +421,7 @@ echo amto_render_shared_styles();
                                 <td>
                                     <div class="d-flex flex-wrap gap-1">
                                         <?php if (!empty($m->file_path)): ?>
-                                            <a href="<?php echo s($m->file_path); ?>" target="_blank" class="tatc-btn-red" style="padding:6px 12px; font-size:12px;">
+                                            <a href="/amto/download.php?type=repo&amp;id=<?php echo (int)$m->id; ?>" target="_blank" class="tatc-btn-red" style="padding:6px 12px; font-size:12px;">
                                                 Buka / Unduh
                                             </a>
                                         <?php else: ?>
@@ -383,6 +429,7 @@ echo amto_render_shared_styles();
                                         <?php endif; ?>
                                         <?php if ($can_manage): ?>
                                             <form method="post" action="/amto/repository.php" style="display:inline;" onsubmit="return confirm('Hapus modul ini dari Repository?');">
+                                                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                                 <input type="hidden" name="action" value="delete_module">
                                                 <input type="hidden" name="mod_id" value="<?php echo $m->id; ?>">
                                                 <button type="submit" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px; color:#b91c1c !important; border-color:#fecaca;">
