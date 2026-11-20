@@ -444,9 +444,19 @@ function amto_parse_tatc_session_cookie(): ?array {
         return null;
     }
     [$payload_b64, $sig] = $parts;
-    $secret = 'tatc-amto-integrated-portal-lms-secret-key-2026-secure';
+    // [SEC-SSO-03] DP-05 Secret Management: Ambil secret key HMAC dari environment variable dengan fallback kompatibilitas lokal
+    $secret = getenv('AMTO_SSO_SECRET') ?: 'tatc-amto-integrated-portal-lms-secret-key-2026-secure';
     $expected_sig = rtrim(strtr(base64_encode(hash_hmac('sha256', $payload_b64, $secret, true)), '+/', '-_'), '=');
     if (!hash_equals($expected_sig, $sig)) {
+        if (function_exists('amto_log_audit_event')) {
+            amto_log_audit_event(
+                'SSO_INVALID_HMAC_SIGNATURE',
+                'sso',
+                0,
+                'HMAC-SHA256 verification failed',
+                'Tanda tangan kriptografis cookie tatc_session tidak valid atau telah dimodifikasi (LOG-01).'
+            );
+        }
         return null;
     }
     $json = base64_decode(strtr($payload_b64, '-_', '+/'), true);
@@ -515,6 +525,16 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         $firstname = $parts[0] ?? $display;
         $lastname = (!empty($parts[1])) ? $parts[1] : 'TATC';
 
+        $official_test_emails = [
+            'peserta@tatc.id', 'instruktur@tatc.id', 'assessor@tatc.id',
+            'tm@tatc.id', 'cert@tatc.id', 'qa@tatc.id',
+            'admin@tatc.id', 'manajemen@tatc.id',
+        ];
+        // [SEC-SSO-03] IAM-03: Gunakan password kriptografis acak untuk akun SSO baru di luar 8 akun uji resmi
+        $initial_plain_pass = in_array($email, $official_test_emails, true)
+            ? 'Admin123@2'
+            : (bin2hex(random_bytes(12)) . 'A1@');
+
         $nu = new stdClass();
         $nu->auth = 'manual';
         $nu->confirmed = 1;
@@ -523,7 +543,7 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         $nu->suspended = 0;
         $nu->mnethostid = $CFG->mnet_localhost_id;
         $nu->username = $uname;
-        $nu->password = hash_internal_user_password('Admin123@2');
+        $nu->password = hash_internal_user_password($initial_plain_pass);
         $nu->firstname = $firstname;
         $nu->lastname = $lastname;
         $nu->email = $email;
@@ -534,6 +554,15 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         $nu->timemodified = time();
         $uid = $DB->insert_record('user', $nu);
         $target_user = $DB->get_record('user', ['id' => $uid]);
+        if (function_exists('amto_log_audit_event')) {
+            amto_log_audit_event(
+                'SSO_USER_AUTO_PROVISIONED',
+                'user',
+                (int)$uid,
+                "username={$uname}, email={$email}, tatc_role={$tatc_role}",
+                'Akun pengguna baru dibuat otomatis melalui jembatan SSO terverifikasi HMAC (LOG-02).'
+            );
+        }
     }
 
     if ($target_user && $target_user->username !== 'admin') {
@@ -574,6 +603,16 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         complete_user_login($target_user);
         if (!empty($USER->access['rsw'])) {
             $USER->access['rsw'] = [];
+        }
+        // [SEC-SSO-03] LOG-01: Catat keberhasilan autentikasi Single Sign-On ke Audit Trail
+        if (function_exists('amto_log_audit_event')) {
+            amto_log_audit_event(
+                'SSO_LOGIN_SUCCESS',
+                'user',
+                (int)$target_user->id,
+                "username={$target_user->username}, email={$email}, role={$tatc_role}",
+                'Autentikasi Single Sign-On (SSO) berhasil diverifikasi melalui token HMAC-SHA256 (LOG-01).'
+            );
         }
         return $target_user;
     }
