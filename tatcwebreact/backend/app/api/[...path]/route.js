@@ -4,7 +4,7 @@ import nodemailer from 'nodemailer';
 import { db } from '../../../lib/db.js';
 import { body, fail, ok } from '../../../lib/http.js';
 import { clearSession, getSession, requireAuth, setSession } from '../../../lib/auth.js';
-import { ADMIN_ROLES, TABLES } from '../../../lib/tables.js';
+import { ADMIN_ROLES, READ_ONLY_ADMIN_EMAILS, READ_ONLY_ADMIN_ROLES, TABLES } from '../../../lib/tables.js';
 import { saveFile } from '../../../lib/upload.js';
 import { checkRateLimit, getClientIp } from '../../../lib/rateLimit.js';
 
@@ -16,8 +16,66 @@ async function tableColumns(table) {
 }
 
 function normalizeRole(role) {
-  const map = { SUPER_ADMIN: 'SUPERADMIN', SUPERADMIN: 'SUPERADMIN', ADMIN: 'ADMIN', INSTRUCTOR: 'INSTRUKTUR', INSTRUKTUR: 'INSTRUKTUR', PARTICIPANT: 'PESERTA', PESERTA: 'PESERTA' };
+  const map = {
+    SUPER_ADMIN: 'SUPERADMIN',
+    SUPERADMIN: 'SUPERADMIN',
+    ADMIN: 'ADMIN',
+    QA: 'ADMIN',
+    R06_QA: 'ADMIN',
+    MANAGEMENT: 'ADMIN',
+    MANAJEMEN: 'ADMIN',
+    R08_MANAGEMENT: 'ADMIN',
+    TRAININGMANAGER: 'ADMIN',
+    R04_TM: 'ADMIN',
+    CERTOFFICER: 'ADMIN',
+    R05_CERT: 'ADMIN',
+    INSTRUCTOR: 'INSTRUKTUR',
+    INSTRUKTUR: 'INSTRUKTUR',
+    ASSESSOR: 'INSTRUKTUR',
+    R03_ASSESSOR: 'INSTRUKTUR',
+    PARTICIPANT: 'PESERTA',
+    PESERTA: 'PESERTA',
+  };
   return map[String(role || '').toUpperCase()] || 'PESERTA';
+}
+
+function resolveAmtoRole(subject) {
+  if (!subject) return 'R01_PESERTA';
+  const email = String(subject.email || '').trim().toLowerCase();
+  const rawRole = String(subject.amto_role || subject.resolved_role?.split(',')[0] || subject.role || '').trim().toUpperCase();
+
+  if (email === 'qa@tatc.id' || ['QA', 'R06_QA'].includes(rawRole)) return 'R06_QA';
+  if (['manajemen@tatc.id', 'management@tatc.id'].includes(email) || ['MANAGEMENT', 'MANAJEMEN', 'R08_MANAGEMENT'].includes(rawRole)) return 'R08_MANAGEMENT';
+  if (email === 'tm@tatc.id' || ['TRAININGMANAGER', 'R04_TM'].includes(rawRole)) return 'R04_TM';
+  if (email === 'cert@tatc.id' || ['CERTOFFICER', 'R05_CERT'].includes(rawRole)) return 'R05_CERT';
+  if (email === 'assessor@tatc.id' || ['ASSESSOR', 'R03_ASSESSOR'].includes(rawRole)) return 'R03_ASSESSOR';
+  if (email === 'admin@tatc.id' || ['SUPERADMIN', 'SUPER_ADMIN', 'R07_ADMIN_IT'].includes(rawRole)) return 'R07_ADMIN_IT';
+  if (normalizeRole(rawRole) === 'ADMIN') return 'R04_TM';
+  if (normalizeRole(rawRole) === 'INSTRUKTUR') return 'R02_INSTRUKTUR';
+  return 'R01_PESERTA';
+}
+
+function isReadOnlyAuditSession(subject) {
+  if (!subject) return false;
+  if (subject.read_only_audit === true) return true;
+  const email = String(subject.email || '').trim().toLowerCase();
+  const rawRole = String(subject.amto_role || subject.role || '').trim().toUpperCase();
+  return READ_ONLY_ADMIN_EMAILS.includes(email) || READ_ONLY_ADMIN_ROLES.includes(rawRole);
+}
+
+/**
+ * Penegakan Kebijakan Keamanan SCP-06 (Quality Assurance Read-Only Audit) &
+ * SCP-07 (Manajemen Read-Only Executive): mencegah operasi tulis/mutasi data (POST/PUT/DELETE).
+ */
+function assertNotReadOnlyAdmin(session) {
+  if (isReadOnlyAuditSession(session)) {
+    const amtoRole = resolveAmtoRole(session);
+    const label = amtoRole === 'R06_QA' ? 'Quality Assurance (R06 - SCP-06)' : 'Manajemen (R08 - SCP-07)';
+    throw {
+      message: `Akses Ditolak (${label}): Akun ini bersifat Read-Only Audit dan tidak diizinkan menambah, mengubah, menyetujui, atau menghapus data operasional.`,
+      status: 403,
+    };
+  }
 }
 
 function hasStrongPassword(password) {
@@ -84,7 +142,9 @@ async function login(request) {
   const role = normalizeRole(user.role || user.resolved_role?.split(',')[0]);
   if (role === 'PESERTA' && 'email_verified_at' in user && !user.email_verified_at) return fail('Silakan verifikasi email terlebih dahulu.', 403);
   if ('last_login_at' in user) await connection().query('UPDATE users SET last_login_at=NOW(), failed_login_attempts=0, lockout_until=NULL WHERE id=?', [user.id]);
-  const safe = { id: user.id, email: user.email, role, status: user.status, name: user.name || null };
+  const amtoRole = resolveAmtoRole(user);
+  const readOnlyAudit = isReadOnlyAuditSession(user);
+  const safe = { id: user.id, email: user.email, role, amto_role: amtoRole, read_only_audit: readOnlyAudit, status: user.status, name: user.name || null };
   await setSession(safe);
   return ok({ user: safe, profile: await profileFor(user) }, 'Login berhasil.');
 }
@@ -109,6 +169,9 @@ async function generic(path, request, params) {
   let session = null;
   if (!isPublicCms) {
     session = await requireAuth(ADMIN_ROLES);
+    if (method !== 'GET') {
+      assertNotReadOnlyAdmin(session);
+    }
   }
   const pool = connection();
   const cols = await tableColumns(table);
@@ -607,7 +670,8 @@ async function verifyCertificate(params) {
 
 
 async function importCsv(route, request) {
-  await requireAuth(ADMIN_ROLES);
+  const session = await requireAuth(ADMIN_ROLES);
+  assertNotReadOnlyAdmin(session);
   const form = await request.formData();
   const file = form.get('file');
   if (!file || typeof file.text !== 'function') return fail('File CSV wajib dipilih.', 422);
@@ -710,6 +774,7 @@ async function portal(route, request, params) {
       if (!['SUPERADMIN', 'ADMIN', 'INSTRUKTUR'].includes(session.role)) {
         return fail('Hanya instruktur atau admin yang berhak mencatat presensi.', 403);
       }
+      assertNotReadOnlyAdmin(session);
       const data = await body(request); const items = Array.isArray(data.attendances) ? data.attendances : [];
       const sessionId = Number(data.session_id || 0);
       for (const item of items) await pool.query(`INSERT INTO attendance(session_id,participant_id,status,notes,recorded_by) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE status=VALUES(status),notes=VALUES(notes),recorded_by=VALUES(recorded_by)`, [sessionId, item.participant_id, item.status, item.notes || null, session.id]);
@@ -931,7 +996,19 @@ async function portal(route, request, params) {
 export async function GET(request, context) {
   try {
     const { path = [] } = await context.params; const route = path.join('/'); const params = new URL(request.url).searchParams;
-    if (route === 'auth/me') { const session = await getSession(); if (!session) return fail('Unauthorized', 401); const user = await findUserByEmail(session.email); return ok({ ...session, role: normalizeRole(user?.role || user?.resolved_role?.split(',')[0] || session.role), profile: user ? await profileFor(user) : null }); }
+    if (route === 'auth/me') {
+      const session = await getSession();
+      if (!session) return fail('Unauthorized', 401);
+      const user = await findUserByEmail(session.email);
+      const subject = user || session;
+      return ok({
+        ...session,
+        role: normalizeRole(user?.role || user?.resolved_role?.split(',')[0] || session.role),
+        amto_role: resolveAmtoRole(subject),
+        read_only_audit: isReadOnlyAuditSession(subject),
+        profile: user ? await profileFor(user) : null,
+      });
+    }
     if (route === 'dashboard/stats') return await dashboard();
     if (route === 'public/open-programs') {
       const pool = connection();
@@ -1219,9 +1296,22 @@ export async function POST(request, context) {
     if (route === 'auth/forgot-password') return await forgotPassword(request);
     if (route === 'auth/reset-password') return await resetPassword(request);
     if (route === 'participants/import' || route === 'instructors/import') return await importCsv(route, request);
-    if (route === 'auth/me') { const session = await getSession(); if (!session) return fail('Unauthorized', 401); const user = await findUserByEmail(session.email); return ok({ ...session, role: normalizeRole(user?.role || user?.resolved_role?.split(',')[0] || session.role), profile: user ? await profileFor(user) : null }); }
+    if (route === 'auth/me') {
+      const session = await getSession();
+      if (!session) return fail('Unauthorized', 401);
+      const user = await findUserByEmail(session.email);
+      const subject = user || session;
+      return ok({
+        ...session,
+        role: normalizeRole(user?.role || user?.resolved_role?.split(',')[0] || session.role),
+        amto_role: resolveAmtoRole(subject),
+        read_only_audit: isReadOnlyAuditSession(subject),
+        profile: user ? await profileFor(user) : null,
+      });
+    }
     if (route.match(/^admin\/programs\/\d+\/fields$/)) {
-      await requireAuth(ADMIN_ROLES);
+      const adminSession = await requireAuth(ADMIN_ROLES);
+      assertNotReadOnlyAdmin(adminSession);
       const programId = route.split('/')[2];
       const data = await body(request);
       const pool = connection();
@@ -1276,6 +1366,7 @@ export async function POST(request, context) {
     if (route.match(/^portal\/registrations\/\d+\/payment$/)) {
       const session = await getSession();
       if (!session) return fail('Unauthorized', 401);
+      assertNotReadOnlyAdmin(session);
       const regId = route.split('/')[2];
       const user = await findUserByEmail(session.email);
       const profile = user ? await profileFor(user) : null;
@@ -1293,7 +1384,8 @@ export async function POST(request, context) {
       return ok(null, 'Payment proof uploaded.');
     }
     if (route.match(/^admin\/registrations\/\d+\/verify$/)) {
-      await requireAuth(ADMIN_ROLES);
+      const session = await requireAuth(ADMIN_ROLES);
+      assertNotReadOnlyAdmin(session);
       const regId = route.split('/')[2];
       const data = await body(request);
       const status = data.status;
@@ -1302,7 +1394,6 @@ export async function POST(request, context) {
       const [regRows] = await pool.query('SELECT * FROM participant_registrations WHERE id=?', [regId]);
       if (!regRows[0]) return fail('Registration not found', 404);
       const reg = regRows[0];
-      const session = await getSession();
       await pool.query('UPDATE participant_registrations SET status=?, notes=?, reviewed_at=NOW(), reviewed_by=? WHERE id=?', [status, notes, session.id, regId]);
       if (status === 'ACCEPTED') {
         await pool.query('INSERT IGNORE INTO batch_participants (batch_id, participant_id, status) VALUES (?,?,?)', [reg.batch_id, reg.participant_id, 'ENROLLED']);
@@ -1357,7 +1448,8 @@ export async function POST(request, context) {
 
     // ── module_topics POST (admin) ───────────────────────────────────────────
     if (route === 'module_topics') {
-      await requireAuth(ADMIN_ROLES);
+      const adminSession = await requireAuth(ADMIN_ROLES);
+      assertNotReadOnlyAdmin(adminSession);
       const pool = connection();
       const data = await body(request);
       const { module_id, title, description, sequence_no, duration_hours } = data;
@@ -1449,7 +1541,8 @@ export async function PUT(request, context) {
 
     // ── module_topics PUT (admin) ────────────────────────────────────────────
     if (route === 'module_topics') {
-      await requireAuth(ADMIN_ROLES);
+      const adminSession = await requireAuth(ADMIN_ROLES);
+      assertNotReadOnlyAdmin(adminSession);
       const pool = connection();
       const data = await body(request);
       const targetId = params.get('id') || data.id;
@@ -1464,8 +1557,8 @@ export async function PUT(request, context) {
 
     // ── BAP PUT — admin approve, reject, or request revision ────────────────
     if (route.match(/^bap\/\d+$/)) {
-      await requireAuth(ADMIN_ROLES);
-      const adminSession = await getSession();
+      const adminSession = await requireAuth(ADMIN_ROLES);
+      assertNotReadOnlyAdmin(adminSession);
       const bapId = Number(route.split('/')[1]);
       const pool = connection();
       const data = await body(request);
