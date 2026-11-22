@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { db } from '../../../lib/db.js';
-import { body, fail, ok } from '../../../lib/http.js';
+import { body, buildCorsHeaders, fail, ok, SECURITY_HEADERS } from '../../../lib/http.js';
 import { clearSession, getSession, requireAuth, setSession } from '../../../lib/auth.js';
 import { ADMIN_ROLES, READ_ONLY_ADMIN_EMAILS, READ_ONLY_ADMIN_ROLES, TABLES } from '../../../lib/tables.js';
 import { saveFile } from '../../../lib/upload.js';
@@ -1690,16 +1690,16 @@ export async function DELETE(request, context) {
   catch (e) { return fail(e.message || 'Server error.', e.status || 500); }
 }
 
-export async function OPTIONS() {
-  const origin = process.env.CORS_ORIGIN || '*';
+export async function OPTIONS(request) {
+  const requestOrigin = request?.headers?.get('origin') || null;
   return new Response(null, {
     status: 204,
     headers: {
-      'Access-Control-Allow-Origin': origin,
+      ...SECURITY_HEADERS,
+      ...buildCorsHeaders(requestOrigin),
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept',
-      'Access-Control-Allow-Credentials': origin === '*' ? 'false' : 'true',
-      'Access-Control-Max-Age': '86400'
-    }
+      'Access-Control-Max-Age': '86400',
+    },
   });
 }
