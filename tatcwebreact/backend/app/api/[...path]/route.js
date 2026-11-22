@@ -283,11 +283,13 @@ async function generic(path, request, params) {
 
     if (method === 'DELETE') {
       if (!id) return fail('ID wajib diisi.', 422);
-      // Remove child records first to avoid FK constraint errors
-      await pool.query('DELETE FROM attendance WHERE session_id=?', [id]);
-      await pool.query('DELETE FROM session_instructors WHERE session_id=?', [id]);
-      await pool.query('DELETE FROM sessions WHERE id=?', [id]);
-      return ok(null, 'Sesi berhasil dihapus.');
+      // SEC-05: Larangan Hard-Delete pada rekam presensi & sesi akademik — gunakan Soft-Delete / Void (status = 'CANCELLED')
+      if (cols.has('deleted_at')) {
+        await pool.query("UPDATE sessions SET status='CANCELLED', deleted_at=NOW() WHERE id=?", [id]);
+      } else {
+        await pool.query("UPDATE sessions SET status='CANCELLED' WHERE id=?", [id]);
+      }
+      return ok({ id, status: 'CANCELLED' }, 'Sesi berhasil dibatalkan (Soft-Delete / Void SEC-05) tanpa menghapus rekam histori presensi.');
     }
   }
 
@@ -431,9 +433,28 @@ async function generic(path, request, params) {
 
   if (method === 'DELETE') {
     if (!id) return fail('ID wajib diisi.', 422);
-    if (cols.has('deleted_at')) await pool.query(`UPDATE \`${table}\` SET deleted_at=NOW()${cols.has('status') ? ", status='INACTIVE'" : ''} WHERE id=?`, [id]);
-    else await pool.query(`DELETE FROM \`${table}\` WHERE id=?`, [id]);
-    return ok(null, 'Data berhasil dihapus.');
+    // SEC-05: Perlindungan integritas rekam akademik & sertifikasi dari penghapusan permanen (Hard-Delete)
+    if (path === 'certificates') {
+      await pool.query("UPDATE `certificates` SET status='REVOKED' WHERE id=?", [id]);
+      return ok({ id, status: 'REVOKED' }, 'Sertifikat berhasil dicabut/dibatalkan (REVOKED - SEC-05).');
+    }
+    if (path === 'exam_results') {
+      return fail('Penghapusan permanen nilai ujian dilarang berdasarkan kebijakan integritas akademik (SEC-05).', 403);
+    }
+    if (path === 'exams') {
+      const [resCount] = await pool.query('SELECT COUNT(*) AS total FROM exam_results WHERE exam_id=?', [id]);
+      if (Number(resCount[0]?.total || 0) > 0 && !cols.has('deleted_at')) {
+        return fail('Ujian yang telah memiliki rekam nilai peserta tidak dapat dihapus permanen (SEC-05).', 409);
+      }
+    }
+    if (cols.has('deleted_at')) {
+      await pool.query(`UPDATE \`${table}\` SET deleted_at=NOW()${cols.has('status') ? ", status='INACTIVE'" : ''} WHERE id=?`, [id]);
+    } else if (cols.has('status')) {
+      await pool.query(`UPDATE \`${table}\` SET status='INACTIVE' WHERE id=?`, [id]);
+    } else {
+      await pool.query(`DELETE FROM \`${table}\` WHERE id=?`, [id]);
+    }
+    return ok(null, 'Data berhasil dinonaktifkan/dihapus sesuai kebijakan Soft-Delete (SEC-05).');
   }
   return fail('Method tidak didukung.', 405);
 }
