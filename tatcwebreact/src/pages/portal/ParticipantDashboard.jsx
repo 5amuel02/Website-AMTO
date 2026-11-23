@@ -319,7 +319,14 @@ const ParticipantDashboard = () => {
 
               {open_programs.length === 0 ? (
                 <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--surface-color)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                  Saat ini belum ada batch program baru yang dibuka. Silakan cek berkala atau hubungi tim administrasi TATC.
+                  <p style={{ marginBottom: '1rem' }}>Saat ini belum ada jadwal batch yang dibuat oleh Admin. Silakan lengkapi berkas verifikasi kelayakan peserta (Eligibility Check: KTP, Ijazah, AMEL) atau cek status persetujuan berkas Anda:</p>
+                  <Link
+                    to="/portal/participant/registration"
+                    className="btn btn-primary"
+                    style={{ padding: '10px 20px', borderRadius: '10px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', fontWeight: '700' }}
+                  >
+                    Buka Menu Registrasi &amp; Cek Status Eligibility
+                  </Link>
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>

@@ -776,7 +776,7 @@ async function portal(route, request, params) {
              p.id as program_id, p.code as program_code, p.name as program_name, p.description, p.requirements
       FROM batches b
       JOIN programs p ON p.id = b.program_id
-      WHERE b.status = 'ACTIVE' AND b.deleted_at IS NULL AND p.deleted_at IS NULL
+      WHERE b.status IN ('ACTIVE', 'OPEN', 'PLANNED') AND b.deleted_at IS NULL AND p.deleted_at IS NULL
         AND b.id NOT IN (SELECT batch_id FROM batch_participants WHERE participant_id=?)
       ORDER BY b.start_date DESC, b.created_at DESC
     `, [participantId]).catch(() => [[]]);
@@ -1038,7 +1038,7 @@ export async function GET(request, context) {
                p.id as program_id, p.code as program_code, p.name as program_name, p.description, p.requirements
         FROM batches b
         JOIN programs p ON p.id = b.program_id
-        WHERE b.status = 'ACTIVE' AND b.deleted_at IS NULL AND p.deleted_at IS NULL
+        WHERE b.status IN ('ACTIVE', 'OPEN', 'PLANNED') AND b.deleted_at IS NULL AND p.deleted_at IS NULL
         ORDER BY b.start_date DESC, b.created_at DESC
       `);
       return ok(rows);
@@ -1265,6 +1265,55 @@ export async function GET(request, context) {
       return ok(rows);
     }
 
+    if (route === 'portal/amto-registration') {
+      const session = await getSession();
+      if (!session) return fail('Unauthorized', 401);
+      const pool = connection();
+      const q = (params.get('q') || '').trim();
+      const [schedules] = await pool.query(
+        `SELECT id, batch_code, program_name, start_date, end_date, room_location, status
+           FROM moodle.mdl_amto_schedules
+          WHERE LOWER(status) NOT IN ('void', 'voided')
+          ORDER BY start_date ASC, id ASC`
+      ).catch(() => [[]]);
+
+      let registrations = [];
+      if (q !== '') {
+        [registrations] = await pool.query(
+          `SELECT * FROM moodle.mdl_amto_registrations
+            WHERE LOWER(status) NOT IN ('void', 'voided')
+              AND (LOWER(registration_no) = LOWER(?) OR LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?))
+            ORDER BY timecreated DESC`,
+          [q, q, q]
+        ).catch(() => [[]]);
+      } else if (['SUPERADMIN', 'ADMIN'].includes(session.role)) {
+        [registrations] = await pool.query(
+          `SELECT * FROM moodle.mdl_amto_registrations
+            WHERE LOWER(status) NOT IN ('void', 'voided')
+            ORDER BY timecreated DESC`
+        ).catch(() => [[]]);
+      } else {
+        const uname = session.email.split('@')[0].toLowerCase();
+        [registrations] = await pool.query(
+          `SELECT * FROM moodle.mdl_amto_registrations
+            WHERE LOWER(status) NOT IN ('void', 'voided')
+              AND (LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?))
+            ORDER BY timecreated DESC`,
+          [session.email, uname]
+        ).catch(() => [[]]);
+      }
+      const [moodleUsers] = await pool.query(
+        `SELECT id, username, firstname, lastname, email
+           FROM moodle.mdl_user
+          WHERE LOWER(email) = LOWER(?) AND deleted = 0 AND suspended = 0
+          LIMIT 1`,
+        [session.email]
+      ).catch(() => [[]]);
+      const lms_account = moodleUsers[0] || null;
+
+      return ok({ schedules, registrations, lms_account });
+    }
+
     if (route === 'admin/registrations') {
       await requireAuth(ADMIN_ROLES);
       const pool = connection();
@@ -1274,7 +1323,27 @@ export async function GET(request, context) {
         JOIN batches b ON b.id = pr.batch_id
         JOIN programs prog ON prog.id = b.program_id
         ORDER BY pr.submitted_at DESC`).catch(() => [[]]);
-      return ok(rows);
+      const [moodleRows] = await pool.query(`
+        SELECT id, registration_no, fullname AS full_name, email, phone, organization, amel_no, program_name, status, admin_notes AS notes, timecreated
+          FROM moodle.mdl_amto_registrations
+         WHERE LOWER(status) NOT IN ('void', 'voided')
+         ORDER BY timecreated DESC
+      `).catch(() => [[]]);
+      const mappedMoodle = moodleRows.map(mr => ({
+        id: `moodle_${mr.id}`,
+        moodle_id: mr.id,
+        full_name: mr.full_name,
+        participant_number: mr.registration_no,
+        phone: mr.phone,
+        email: mr.email,
+        program_name: mr.program_name,
+        batch_name: mr.organization ? `${mr.organization} (${mr.registration_no})` : mr.registration_no,
+        total_amount: 0,
+        status: mr.status === 'approved' ? 'ACCEPTED' : (mr.status === 'rejected' ? 'REJECTED' : 'UNDER_REVIEW'),
+        submitted_at: new Date(Number(mr.timecreated || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+        notes: mr.notes
+      }));
+      return ok([...mappedMoodle, ...rows]);
     }
     if (route.match(/^portal\/programs\/\d+\/form$/)) {
       const programId = route.split('/')[2];
@@ -1404,14 +1473,132 @@ export async function POST(request, context) {
       await pool.query('UPDATE participant_registrations SET status=?, payment_proof_url=? WHERE id=?', ['UNDER_REVIEW', url, regId]);
       return ok(null, 'Payment proof uploaded.');
     }
-    if (route.match(/^admin\/registrations\/\d+\/verify$/)) {
+    if (route === 'portal/amto-registration') {
+      const session = await getSession();
+      if (!session) return fail('Unauthorized', 401);
+      const data = await body(request);
+      const fullname = String(data.fullname || '').trim();
+      const username = String(data.username || '').trim().toLowerCase().replace(/[^a-z0-9_.-]/g, '');
+      const nik = String(data.nik || '').trim();
+      const email = String(data.email || session.email || '').trim().toLowerCase();
+      const phone = String(data.phone || '').trim();
+      const organization = String(data.organization || 'Mandiri / Umum').trim();
+      const amel_no = String(data.amel_no || '').trim();
+      const rawPassword = String(data.password || '');
+      const scheduleId = Number(data.schedule_id || 0);
+
+      if (!fullname || !username || !nik || !email || !phone) {
+        return fail('Mohon lengkapi seluruh kolom wajib (Nama Lengkap, Username, NIK, Email, dan No. Telepon).', 422);
+      }
+      if (username === 'admin' || username === 'guest') {
+        return fail('Username tersebut sudah digunakan oleh sistem. Silakan gunakan username peserta lain.', 422);
+      }
+      if (rawPassword.length < 8) {
+        return fail('Kata sandi wajib minimal 8 karakter sesuai kebijakan keamanan IAM-03.', 422);
+      }
+
+      const pool = connection();
+      let progName = 'Verifikasi Kelayakan Peserta (Eligibility Check AMTO)';
+      if (scheduleId > 0) {
+        const [sRows] = await pool.query('SELECT batch_code, program_name FROM moodle.mdl_amto_schedules WHERE id = ? LIMIT 1', [scheduleId]).catch(() => [[]]);
+        if (sRows[0]) {
+          progName = `${sRows[0].batch_code} – ${sRows[0].program_name}`;
+        }
+      }
+
+      const [lastRows] = await pool.query('SELECT id FROM moodle.mdl_amto_registrations ORDER BY id DESC LIMIT 1').catch(() => [[]]);
+      const nextNum = (lastRows[0]?.id ? Number(lastRows[0].id) : 0) + 1;
+      const regNo = `REG-AMTO-2026-${String(nextNum).padStart(4, '0')}`;
+
+      const docKtp = (data.doc_ktp && typeof data.doc_ktp.arrayBuffer === 'function') ? await saveFile(data.doc_ktp, 'documents') : '';
+      const docIjazah = (data.doc_ijazah && typeof data.doc_ijazah.arrayBuffer === 'function') ? await saveFile(data.doc_ijazah, 'documents') : '';
+      const docPendukung = (data.doc_pendukung && typeof data.doc_pendukung.arrayBuffer === 'function') ? await saveFile(data.doc_pendukung, 'documents') : '';
+
+      const passHash = (await bcrypt.hash(rawPassword, 10)).replace(/^\$2[ab]\$/, '$2y$');
+      const nowSec = Math.floor(Date.now() / 1000);
+
+      const [ins] = await pool.query(
+        `INSERT INTO moodle.mdl_amto_registrations
+          (registration_no, userid, username, fullname, nik, email, phone, organization, amel_no, schedule_id, program_name, password_hash, doc_ktp, doc_ijazah, doc_pendukung, status, admin_notes, created_by, verified_by, timecreated, timemodified)
+         VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'Menunggu verifikasi berkas prasyarat oleh Admin / Training Manager.', 0, 0, ?, ?)`,
+        [regNo, username, fullname, nik, email, phone, organization, amel_no, scheduleId, progName, passHash, docKtp, docIjazah, docPendukung, nowSec, nowSec]
+      );
+
+      await pool.query(
+        `INSERT INTO participants (participant_number, full_name, phone, email, status, nik, institution, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE full_name=VALUES(full_name), phone=VALUES(phone), nik=VALUES(nik), institution=VALUES(institution), updated_at=NOW()`,
+        [regNo, fullname, phone, email, nik.slice(0, 20), organization]
+      ).catch(() => {});
+
+      return ok({ id: ins.insertId, registration_no: regNo }, 'Berkas registrasi & verifikasi kelayakan berhasil dikirim.');
+    }
+
+    if (route.match(/^admin\/registrations\/[^/]+\/verify$/)) {
       const session = await requireAuth(ADMIN_ROLES);
       assertNotReadOnlyAdmin(session);
-      const regId = route.split('/')[2];
+      const rawId = route.split('/')[2];
       const data = await body(request);
       const status = data.status;
       const notes = data.notes || null;
       const pool = connection();
+
+      if (String(rawId).startsWith('moodle_')) {
+        const moodleId = Number(String(rawId).replace('moodle_', ''));
+        const mStatus = (status === 'ACCEPTED') ? 'approved' : 'rejected';
+        const mNotes = notes || (status === 'ACCEPTED' ? 'Berkas lengkap & terverifikasi (Eligible). Akun LMS telah diaktifkan.' : 'Berkas prasyarat belum sesuai / perlu revisi.');
+        const nowSec = Math.floor(Date.now() / 1000);
+
+        let targetUserId = 0;
+        if (mStatus === 'approved') {
+          const [regRows] = await pool.query('SELECT * FROM moodle.mdl_amto_registrations WHERE id=? LIMIT 1', [moodleId]).catch(() => [[]]);
+          const reg = regRows[0];
+          if (reg) {
+            const parts = String(reg.fullname || '').trim().split(/\s+/);
+            const firstname = parts[0] || reg.fullname || 'Peserta';
+            const lastname = parts.slice(1).join(' ') || 'AMTO';
+            const [existUsers] = await pool.query(
+              'SELECT id FROM moodle.mdl_user WHERE (LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?)) AND deleted=0 LIMIT 1',
+              [reg.username, reg.email]
+            ).catch(() => [[]]);
+            if (existUsers[0]) {
+              targetUserId = existUsers[0].id;
+              await pool.query(
+                'UPDATE moodle.mdl_user SET confirmed=1, suspended=0, firstname=?, lastname=?, email=?, password=?, timemodified=? WHERE id=?',
+                [firstname, lastname, reg.email, reg.password_hash, nowSec, targetUserId]
+              ).catch(() => {});
+            } else {
+              const [insU] = await pool.query(
+                `INSERT INTO moodle.mdl_user
+                  (auth, confirmed, policyagreed, deleted, suspended, mnethostid, username, password, idnumber, firstname, lastname, email, phone1, institution, city, country, lang, timecreated, timemodified)
+                 VALUES ('manual', 1, 1, 0, 0, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'Bandung', 'ID', 'en', ?, ?)`,
+                [reg.username, reg.password_hash, reg.registration_no, firstname, lastname, reg.email, reg.phone || '', reg.organization || '', nowSec, nowSec]
+              ).catch(() => [{ insertId: 0 }]);
+              targetUserId = insU.insertId || 0;
+            }
+            if (targetUserId > 0) {
+              const [roles] = await pool.query("SELECT id FROM moodle.mdl_role WHERE shortname IN ('student', 'r01_trainee')").catch(() => [[]]);
+              for (const r of roles) {
+                const [existRa] = await pool.query('SELECT id FROM moodle.mdl_role_assignments WHERE roleid=? AND contextid=1 AND userid=? LIMIT 1', [r.id, targetUserId]).catch(() => [[]]);
+                if (!existRa[0]) {
+                  await pool.query(
+                    'INSERT INTO moodle.mdl_role_assignments (roleid, contextid, userid, timemodified, modifierid) VALUES (?, 1, ?, ?, 2)',
+                    [r.id, targetUserId, nowSec]
+                  ).catch(() => {});
+                }
+              }
+            }
+          }
+        }
+
+        await pool.query(
+          'UPDATE moodle.mdl_amto_registrations SET userid=CASE WHEN ?>0 THEN ? ELSE userid END, status=?, admin_notes=?, timemodified=? WHERE id=?',
+          [targetUserId, targetUserId, mStatus, mNotes, nowSec, moodleId]
+        );
+        return ok(null, 'Status verifikasi kelayakan peserta berhasil diperbarui.');
+      }
+
+      const regId = rawId;
       const [regRows] = await pool.query('SELECT * FROM participant_registrations WHERE id=?', [regId]);
       if (!regRows[0]) return fail('Registration not found', 404);
       const reg = regRows[0];

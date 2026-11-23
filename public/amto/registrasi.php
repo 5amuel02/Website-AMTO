@@ -15,6 +15,10 @@ $PAGE->set_heading('Data & Verifikasi Registrasi Peserta');
 
 $role = amto_current_role();
 $rbac_role = amto_current_rbac_role();
+if ($role === 'student' || $role === 'guest') {
+    header('Location: http://localhost:5173/portal/participant/registration');
+    exit;
+}
 $can_verify_reg = in_array($rbac_role, ['admin', 'trainingmanager', 'certofficer'], true);
 $is_audit_readonly = in_array($rbac_role, ['qa', 'management', 'adminit'], true);
 $notice_msg = '';
@@ -95,8 +99,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
     $schedule_id = optional_param('schedule_id', 0, PARAM_INT);
     $raw_password = optional_param('password', '', PARAM_RAW);
 
-    if ($fullname === '' || $username === '' || $nik === '' || $email === '' || $schedule_id <= 0) {
-        $notice_msg = 'Mohon lengkapi seluruh kolom wajib (Nama Lengkap, Username, NIK, Email, dan Program Pelatihan).';
+    if ($fullname === '' || $username === '' || $nik === '' || $email === '') {
+        $notice_msg = 'Mohon lengkapi seluruh kolom wajib (Nama Lengkap, Username, NIK, dan Email).';
         $notice_type = 'danger';
     } else if ($username === 'admin' || $username === 'guest') {
         $notice_msg = 'Username tersebut sudah digunakan oleh sistem. Silakan gunakan username peserta lain.';
@@ -115,8 +119,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
             exit;
         }
 
-        $sched = $DB->get_record('amto_schedules', ['id' => $schedule_id]);
-        $prog_name = $sched ? ($sched->batch_code . ' – ' . $sched->program_name) : 'Program Pelatihan AMTO';
+        $sched = ($schedule_id > 0) ? $DB->get_record('amto_schedules', ['id' => $schedule_id]) : null;
+        $prog_name = $sched ? ($sched->batch_code . ' – ' . $sched->program_name) : 'Verifikasi Kelayakan Peserta (Eligibility Check AMTO)';
 
         $last_records = $DB->get_records('amto_registrations', null, 'id DESC', 'id', 0, 1);
         $next_num = !empty($last_records) ? (reset($last_records)->id + 1) : 1;
@@ -382,10 +386,10 @@ echo amto_render_shared_styles();
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                 <span>Lihat Jadwal &amp; Batch Pelatihan</span>
             </a>
-            <?php if ($role === 'admin'): ?>
-            <button type="button" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:700;" onclick="var f=document.getElementById('tatcRegFormPanel'); f.style.display = (f.style.display==='none' ? 'block' : 'none');">
+            <?php if ($role === 'admin' || ($role === 'student' && empty($visible_regs))): ?>
+            <button type="button" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:700;" onclick="var f=document.getElementById('tatcRegFormPanel'); if(f){ f.style.display = (f.style.display==='none' ? 'block' : 'none'); }">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                <span>Input Pendaftar Baru</span>
+                <span><?php echo ($role === 'admin') ? 'Input Pendaftar Baru' : 'Ajukan Verifikasi Kelayakan (Eligibility)'; ?></span>
             </button>
             <?php elseif ($role === 'guest'): ?>
             <a href="/login/index.php" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:700;">
@@ -642,15 +646,15 @@ echo amto_render_shared_styles();
     </div>
     <?php endif; ?>
 
-    <!-- FORM PENDAFTARAN PESERTA BARU: Hanya tampil untuk Guest (belum login) atau ketika Admin klik Input Pendaftar Baru -->
-    <?php if ($role === 'guest' || $role === 'admin'): ?>
+    <!-- FORM PENDAFTARAN & VERIFIKASI KELAYAKAN PESERTA (ELIGIBILITY CHECK AMTO) -->
+    <?php if ($role === 'guest' || $role === 'admin' || ($role === 'student' && empty($visible_regs))): ?>
     <div id="tatcRegFormPanel" class="tatc-panel" style="<?php echo ($role === 'admin' || $check_query !== '') ? 'display:none;' : 'display:block;'; ?>">
         <div class="tatc-panel-header">
             <div>
-                <h2 class="tatc-panel-title">Formulir Pendaftaran Peserta Pelatihan AMTO Baru</h2>
-                <p class="tatc-panel-sub">Lengkapi identitas sesuai KTP, pilih jadwal batch pelatihan, dan unggah dokumen prasyarat (Format: PDF/JPG/PNG, Maks. 5 MB).</p>
+                <h2 class="tatc-panel-title">Formulir Pendaftaran &amp; Verifikasi Kelayakan Peserta (Eligibility Check AMTO)</h2>
+                <p class="tatc-panel-sub">Lengkapi identitas sesuai KTP dan unggah dokumen prasyarat (KTP, Ijazah, AMEL/Surat Tugas — PDF/JPG/PNG, Maks. 5 MB) untuk diperiksa kelayakannya oleh Admin / Training Manager.</p>
             </div>
-            <span class="tatc-badge tatc-badge-open">Standar IAM-03 &amp; Validasi Berkas</span>
+            <span class="tatc-badge tatc-badge-open">Verifikasi Eligibility Peserta</span>
         </div>
 
         <form method="post" action="/amto/registrasi.php" enctype="multipart/form-data">
@@ -660,11 +664,11 @@ echo amto_render_shared_styles();
             <div class="tatc-form-grid mb-3">
                 <div>
                     <label class="tatc-label">Nama Lengkap (Sesuai KTP &amp; Sertifikat) *</label>
-                    <input type="text" name="fullname" class="tatc-input" placeholder="Contoh: Andi Pratama Wijaya" required>
+                    <input type="text" name="fullname" class="tatc-input" placeholder="Contoh: Andi Pratama Wijaya" value="<?php echo ($role === 'student' && isloggedin()) ? s(fullname($USER)) : ''; ?>" required>
                 </div>
                 <div>
-                    <label class="tatc-label">Username Akun LMS (Untuk Login Nanti) *</label>
-                    <input type="text" name="username" class="tatc-input" placeholder="Contoh: samuelm (huruf kecil tanpa spasi)" required>
+                    <label class="tatc-label">Username Akun LMS *</label>
+                    <input type="text" name="username" class="tatc-input" placeholder="Contoh: samuelm (huruf kecil tanpa spasi)" value="<?php echo ($role === 'student' && isloggedin()) ? s($USER->username) : ''; ?>" required>
                 </div>
                 <div>
                     <label class="tatc-label">NIK (Nomor Induk Kependudukan) *</label>
@@ -672,7 +676,7 @@ echo amto_render_shared_styles();
                 </div>
                 <div>
                     <label class="tatc-label">Alamat Email Resmi *</label>
-                    <input type="email" name="email" class="tatc-input" placeholder="nama@perusahaan.com" required>
+                    <input type="email" name="email" class="tatc-input" placeholder="nama@perusahaan.com" value="<?php echo ($role === 'student' && isloggedin()) ? s($USER->email) : ''; ?>" required>
                 </div>
                 <div>
                     <label class="tatc-label">Nomor Telepon / WhatsApp *</label>
@@ -684,7 +688,7 @@ echo amto_render_shared_styles();
                 </div>
                 <div>
                     <label class="tatc-label">Nomor Lisensi AMEL / Basic Certificate (Opsional)</label>
-                    <input type="text" name="amel_no" class="tatc-input" placeholder="Kosongkan jika mengambil Basic License baru">
+                    <input type="text" name="amel_no" class="tatc-input" placeholder="Kosongkan jika belum memiliki AMEL">
                 </div>
                 <div>
                     <label class="tatc-label">Password Akun LMS (Min. 8 Karakter - Standar IAM-03) *</label>
@@ -693,9 +697,9 @@ echo amto_render_shared_styles();
             </div>
 
             <div class="mb-3">
-                <label class="tatc-label">Pilih Program &amp; Batch Jadwal Pelatihan AMTO *</label>
-                <select name="schedule_id" class="tatc-select" required>
-                    <option value="">-- Pilih Batch &amp; Program Pelatihan --</option>
+                <label class="tatc-label">Tujuan Verifikasi Kelayakan / Jadwal Pelatihan (Opsional jika jadwal belum dibuat)</label>
+                <select name="schedule_id" class="tatc-select">
+                    <option value="0">Verifikasi Kelayakan Peserta Umum (Eligibility Check AMTO CASR Part 147)</option>
                     <?php foreach ($schedules as $s): ?>
                         <option value="<?php echo $s->id; ?>" <?php echo ($preselect_schedule == $s->id) ? 'selected' : ''; ?>>
                             [<?php echo s($s->batch_code); ?>] <?php echo s($s->program_name); ?> &mdash; Mulai: <?php echo s($s->start_date); ?> (<?php echo s($s->room_location); ?>)
@@ -722,7 +726,7 @@ echo amto_render_shared_styles();
             <div class="d-flex justify-content-end gap-2">
                 <button type="submit" class="tatc-btn-red">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                    <span>Kirim Pendaftaran Peserta</span>
+                    <span>Kirim Berkas Verifikasi Kelayakan Peserta</span>
                 </button>
             </div>
         </form>

@@ -105,7 +105,11 @@ if ($cookie_data && !empty($cookie_data['email'])) {
     }
 
     $_SESSION['amto_last_tatc_token'] = $_COOKIE['tatc_session'];
-    amto_login_moodle_user_from_tatc($verified_email, $verified_role, $name);
+    $logged_user = amto_login_moodle_user_from_tatc($verified_email, $verified_role, $name);
+    if (!$logged_user) {
+        header('Location: http://localhost:5173/portal/participant/registration?lms_status=unregistered');
+        exit;
+    }
 } else if (!isloggedin() || isguestuser()) {
     // Tidak memiliki token HMAC tatc_session yang valid dan belum login di Moodle: blokir bypass URL
     if ($req_email !== '' && function_exists('amto_log_audit_event')) {

@@ -41,6 +41,7 @@ import ManageNews from './pages/admin/cms/ManageNews';
 // Portal Layout & Pages
 import PortalLayout from './layouts/PortalLayout';
 import ParticipantDashboard from './pages/portal/ParticipantDashboard';
+import ParticipantRegistration from './pages/portal/ParticipantRegistration';
 import ParticipantSchedule from './pages/portal/ParticipantSchedule';
 import InstructorDashboard from './pages/portal/InstructorDashboard';
 import ManageMaterials from './pages/portal/ManageMaterials';
@@ -107,9 +108,10 @@ function App() {
         <Route path="/portal" element={<PortalLayout />}>
           {/* Participant Routes */}
           <Route path="participant" element={<ParticipantDashboard />} />
+          <Route path="participant/registration" element={<ParticipantRegistration />} />
           <Route path="participant/schedule" element={<ParticipantSchedule />} />
           <Route path="participant/profile" element={<ParticipantProfile />} />
-          <Route path="register" element={<RegisterProgram />} />
+          <Route path="register" element={<ParticipantRegistration />} />
           
           {/* Instructor Routes */}
           <Route path="instructor" element={<InstructorDashboard />} />

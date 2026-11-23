@@ -153,6 +153,14 @@ function Home() {
             <a href="#about" onClick={() => handleNavClick('about')} style={getNavItemStyle('about')}>About Us</a>
             <a href="#news" onClick={() => handleNavClick('news')} style={getNavItemStyle('news')}>News</a>
             <a href="#contacts" onClick={() => handleNavClick('contacts')} style={getNavItemStyle('contacts')}>Contacts</a>
+            {user && (
+              <Link
+                to={user.role === 'SUPERADMIN' || user.role === 'ADMIN' ? '/admin/registrations' : '/portal/participant/registration'}
+                style={getNavItemStyle('registrasi')}
+              >
+                Registrasi &amp; Status
+              </Link>
+            )}
             <a
               href={user ? `http://localhost:8080/amto/sso.php?email=${encodeURIComponent(user.email || '')}&role=${encodeURIComponent(user.role || 'PESERTA')}&target=/my/` : "http://localhost:8080/amto/sso.php?target=/my/"}
               style={getNavItemStyle('lms')}

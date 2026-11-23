@@ -274,14 +274,39 @@ foreach ($test_accounts as $acc) {
         }
         $full_name = trim($acc['firstname'] . ' ' . $acc['lastname']);
         $DB->execute(
-            "INSERT INTO tatc_web.users (email, password_hash, role, status, email_verified_at, name, failed_login_attempts, created_at, updated_at)
-             VALUES (?, ?, ?, 'ACTIVE', NOW(), ?, 0, NOW(), NOW())
-             ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), role = VALUES(role), status = 'ACTIVE', name = VALUES(name), failed_login_attempts = 0, lockout_until = NULL",
-            [$acc['email'], $tatc_bcrypt_hash, $tatc_role, $full_name]
+            "INSERT INTO tatc_web.users (email, password_hash, role, status, email_verified_at, created_at, updated_at)
+             VALUES (?, ?, ?, 'ACTIVE', NOW(), NOW(), NOW())
+             ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), role = VALUES(role), status = 'ACTIVE', email_verified_at = NOW()",
+            [$acc['email'], $tatc_bcrypt_hash, $tatc_role]
         );
     } catch (Throwable $e) {
         // Ignore if tatc_web is not present
     }
+}
+
+// Also ensure the 2 new Portal TATC test participant accounts (dimas@tatc.id & reza@tatc.id) exist in tatc_web for registration flow testing
+try {
+    $tatc_bcrypt_hash = str_replace('$2y$', '$2a$', password_hash($default_pass, PASSWORD_BCRYPT));
+    $portal_only_participants = [
+        ['email' => 'dimas@tatc.id', 'p_number' => 'P-2026-NEW01', 'full_name' => 'Dimas Saputra',   'nik' => '3273011508990002', 'phone' => '081288997766', 'institution' => 'Telkom University'],
+        ['email' => 'reza@tatc.id',  'p_number' => 'P-2026-NEW02', 'full_name' => 'Reza Firmansyah', 'nik' => '3273012204000003', 'phone' => '081377889900', 'institution' => 'GMF AeroAsia / Calon Peserta'],
+    ];
+    foreach ($portal_only_participants as $pop) {
+        $DB->execute(
+            "INSERT INTO tatc_web.users (email, password_hash, role, status, email_verified_at, created_at, updated_at)
+             VALUES (?, ?, 'PESERTA', 'ACTIVE', NOW(), NOW(), NOW())
+             ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), role = 'PESERTA', status = 'ACTIVE', email_verified_at = NOW()",
+            [$pop['email'], $tatc_bcrypt_hash]
+        );
+        $DB->execute(
+            "INSERT INTO tatc_web.participants (participant_number, full_name, nik, phone, email, institution, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', NOW(), NOW())
+             ON DUPLICATE KEY UPDATE full_name = VALUES(full_name), nik = VALUES(nik), phone = VALUES(phone), institution = VALUES(institution), status = 'ACTIVE'",
+            [$pop['p_number'], $pop['full_name'], $pop['nik'], $pop['phone'], $pop['email'], $pop['institution']]
+        );
+    }
+} catch (Throwable $e) {
+    // Ignore if tatc_web is not present
 }
 
 echo "=== 8 Role RBAC & Official Test Accounts Provisioning Completed ===\n";

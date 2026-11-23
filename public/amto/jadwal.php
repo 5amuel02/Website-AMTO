@@ -377,19 +377,23 @@ echo amto_render_shared_styles();
                                         </form>
                                     </div>
                                 <?php elseif ($role === 'instructor'): ?>
-                                    <a href="/course/index.php" class="tatc-btn-outline" style="padding:6px 12px; font-size:12px;">
+                                    <a href="/amto/repository.php" class="tatc-btn-outline" style="padding:6px 12px; font-size:12px;">
                                         Buka Materi Kelas
                                     </a>
                                 <?php elseif ($role === 'student' && isloggedin() && !isguestuser()): ?>
                                     <?php if ($is_my_batch): ?>
                                         <span class="tatc-badge tatc-badge-approved">Batch Pelatihan Saya</span>
+                                    <?php elseif ($s->status === 'Open Registration'): ?>
+                                        <a href="http://localhost:5173/portal/participant" class="tatc-btn-red" style="padding:7px 14px; font-size:12.5px;">
+                                            Daftar di Portal TATC (5173)
+                                        </a>
                                     <?php else: ?>
                                         <span style="font-size:12px; color:#64748b;">Jadwal Batch Lain</span>
                                     <?php endif; ?>
                                 <?php else: ?>
                                     <?php if ($s->status === 'Open Registration'): ?>
                                         <a href="/amto/registrasi.php?schedule_id=<?php echo $s->id; ?>" class="tatc-btn-red" style="padding:7px 14px; font-size:12.5px;">
-                                            Daftar Batch Ini
+                                            Daftar &amp; Cek Eligibility
                                         </a>
                                     <?php else: ?>
                                         <span style="font-size:12px; color:#94a3b8; font-weight:600;">Pendaftaran Tutup</span>

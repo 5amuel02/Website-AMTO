@@ -66,6 +66,9 @@ function News() {
             <a href="/#about" style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--navbar-text)', opacity: 0.88, padding: '6px 12px', borderRadius: '999px', textDecoration: 'none', fontSize: '0.9rem', fontWeight: '500', whiteSpace: 'nowrap', transition: 'all 0.2s' }}>About Us</a>
             <Link to="/news" style={{ display: 'inline-flex', alignItems: 'center', color: '#dc2626', background: 'rgba(220, 38, 38, 0.1)', border: '1px solid rgba(220, 38, 38, 0.28)', padding: '6px 14px', borderRadius: '999px', textDecoration: 'none', fontSize: '0.9rem', fontWeight: '700', whiteSpace: 'nowrap' }}>News</Link>
             <a href="#contacts" style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--navbar-text)', opacity: 0.88, padding: '6px 12px', borderRadius: '999px', textDecoration: 'none', fontSize: '0.9rem', fontWeight: '500', whiteSpace: 'nowrap', transition: 'all 0.2s' }}>Contacts</a>
+            {user && (
+              <Link to="/portal/participant/registration" style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--navbar-text)', opacity: 0.88, padding: '6px 12px', borderRadius: '999px', textDecoration: 'none', fontSize: '0.9rem', fontWeight: '500', whiteSpace: 'nowrap', transition: 'all 0.2s' }}>Registrasi &amp; Status</Link>
+            )}
             <a href={user ? `http://localhost:8080/amto/sso.php?email=${encodeURIComponent(user.email || '')}&role=${encodeURIComponent(user.role || 'PESERTA')}&target=/my/` : "http://localhost:8080/amto/sso.php?target=/my/"} style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--navbar-text)', opacity: 0.88, padding: '6px 12px', borderRadius: '999px', textDecoration: 'none', fontSize: '0.9rem', fontWeight: '500', whiteSpace: 'nowrap', transition: 'all 0.2s' }}>LMS E-Learning</a>
           </div>
 

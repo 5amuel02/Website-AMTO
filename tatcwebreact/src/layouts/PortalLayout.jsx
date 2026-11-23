@@ -23,9 +23,10 @@ const PortalLayout = () => {
     { name: 'Berita Acara (BAP)', path: '/portal/instructor/bap',       icon: 'M9 12h6 M9 16h6 M4 4v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6H6a2 2 0 0 0-2 2z' },
     { name: 'Profil Saya',       path: '/portal/instructor/profile',   icon: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z' },
   ] : [
-    { name: 'Dashboard',   path: '/portal/participant',          icon: 'M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
-    { name: 'My Schedule', path: '/portal/participant/schedule', icon: 'M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z M12 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6z' },
-    { name: 'Profil Saya', path: '/portal/participant/profile',  icon: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z' },
+    { name: 'Dashboard',           path: '/portal/participant',              icon: 'M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
+    { name: 'Registrasi & Status', path: '/portal/participant/registration', icon: 'M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M8.5 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z' },
+    { name: 'My Schedule',         path: '/portal/participant/schedule',     icon: 'M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z M12 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6z' },
+    { name: 'Profil Saya',         path: '/portal/participant/profile',      icon: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z' },
   ];
 
   return (
@@ -87,7 +88,31 @@ const PortalLayout = () => {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
             </svg>
-            LMS Repository Modul
+            Kelas &amp; Repository Modul
+          </a>
+          <a
+            href={`http://localhost:8080/amto/sso.php?email=${encodeURIComponent(user.email || '')}&role=${encodeURIComponent(user.role || 'PESERTA')}&name=${encodeURIComponent(displayName)}&target=/amto/ujian_logbook.php`}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1.5rem',
+              color: 'var(--text-main)', textDecoration: 'none', fontWeight: '500'
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+            </svg>
+            Ujian CBT &amp; Logbook
+          </a>
+          <a
+            href={`http://localhost:8080/amto/sso.php?email=${encodeURIComponent(user.email || '')}&role=${encodeURIComponent(user.role || 'PESERTA')}&name=${encodeURIComponent(displayName)}&target=/amto/sertifikat.php`}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1.5rem',
+              color: 'var(--text-main)', textDecoration: 'none', fontWeight: '500'
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>
+            </svg>
+            E-Sertifikat AMTO
           </a>
 
           {/* Logout button — di bawah nav items */}

@@ -115,6 +115,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage) {
             $rec->timecreated = time();
 
             $new_mod_id = $DB->insert_record('amto_repository', $rec);
+            if (function_exists('amto_sync_cross_db')) {
+                amto_sync_cross_db(true);
+            }
             if (function_exists('amto_log_audit_event')) {
                 amto_log_audit_event('REPO_MODULE_UPLOAD', 'amto_repository', (int)$new_mod_id, "module={$module_code}, ver={$rec->doc_version}", "Uploaded training manual {$title}, SHA256=" . ($rec->file_hash ?: 'none'));
             }

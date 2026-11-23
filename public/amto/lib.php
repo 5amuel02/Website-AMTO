@@ -138,6 +138,96 @@ function amto_ensure_tables(): void {
         amto_log_audit_event('REPO_INTEGRITY_VERIFIED', 'amto_repository', 1, 'SHA-256 Checksum Verified (DP-09)', 'Verified cryptographic SHA-256 checksum on controlled CASR Part 147 training manuals.');
     }
 
+    // 5. Table: amto_exams (Ujian Teori CBT & Evaluasi Praktik Hangar CASR Part 147)
+    if (!$dbman->table_exists('amto_exams')) {
+        $sql = "CREATE TABLE {amto_exams} (
+            id BIGINT(10) NOT NULL AUTO_INCREMENT,
+            exam_code VARCHAR(50) NOT NULL,
+            title VARCHAR(255) NOT NULL,
+            category_type VARCHAR(100) NOT NULL DEFAULT 'Basic License',
+            batch_code VARCHAR(80) NOT NULL DEFAULT 'BATCH-AMTO-2601',
+            exam_type VARCHAR(80) NOT NULL DEFAULT 'Written CBT (Multiple Choice)',
+            passing_grade INT(10) NOT NULL DEFAULT 75,
+            duration_mins INT(10) NOT NULL DEFAULT 60,
+            exam_date VARCHAR(30) NOT NULL DEFAULT '2026-12-05',
+            assessor_name VARCHAR(150) NOT NULL DEFAULT 'Capt. Hendra Wijaya',
+            status VARCHAR(40) NOT NULL DEFAULT 'Active',
+            timecreated BIGINT(10) NOT NULL DEFAULT 0,
+            PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        $DB->execute($sql);
+    }
+
+    // 6. Table: amto_exam_results (Hasil Ujian & Nilai Assessment Peserta)
+    if (!$dbman->table_exists('amto_exam_results')) {
+        $sql = "CREATE TABLE {amto_exam_results} (
+            id BIGINT(10) NOT NULL AUTO_INCREMENT,
+            exam_id BIGINT(10) NOT NULL DEFAULT 0,
+            exam_code VARCHAR(50) NOT NULL,
+            exam_title VARCHAR(255) NOT NULL,
+            userid BIGINT(10) NOT NULL DEFAULT 0,
+            username VARCHAR(100) NOT NULL,
+            fullname VARCHAR(200) NOT NULL,
+            score INT(10) NOT NULL DEFAULT 0,
+            passing_grade INT(10) NOT NULL DEFAULT 75,
+            status VARCHAR(40) NOT NULL DEFAULT 'COMPETENT',
+            notes TEXT DEFAULT NULL,
+            assessed_by VARCHAR(150) NOT NULL DEFAULT 'Capt. Hendra Wijaya (R03 Assessor)',
+            timecreated BIGINT(10) NOT NULL DEFAULT 0,
+            PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        $DB->execute($sql);
+    }
+
+    // 7. Table: amto_logbooks (Practical Logbook Hangar & Presensi Praktik Peserta)
+    if (!$dbman->table_exists('amto_logbooks')) {
+        $sql = "CREATE TABLE {amto_logbooks} (
+            id BIGINT(10) NOT NULL AUTO_INCREMENT,
+            log_no VARCHAR(50) NOT NULL,
+            userid BIGINT(10) NOT NULL DEFAULT 0,
+            username VARCHAR(100) NOT NULL,
+            fullname VARCHAR(200) NOT NULL,
+            batch_code VARCHAR(80) NOT NULL DEFAULT 'BATCH-AMTO-2601',
+            practice_date VARCHAR(30) NOT NULL,
+            ata_chapter VARCHAR(100) NOT NULL,
+            task_title VARCHAR(255) NOT NULL,
+            hangar_location VARCHAR(150) NOT NULL DEFAULT 'Hangar B-01 TATC',
+            duration_hours VARCHAR(20) NOT NULL DEFAULT '4.0',
+            tools_used VARCHAR(255) NOT NULL DEFAULT 'Standard Avionics & Mechanical ToolKit',
+            description TEXT DEFAULT NULL,
+            instructor_notes TEXT DEFAULT NULL,
+            verified_by VARCHAR(150) DEFAULT '',
+            status VARCHAR(40) NOT NULL DEFAULT 'Pending Verification',
+            timecreated BIGINT(10) NOT NULL DEFAULT 0,
+            PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        $DB->execute($sql);
+    }
+
+    // 8. Table: amto_certificates (E-Sertifikat & Certificate of Recognition CASR Part 147 No. 147D-19)
+    if (!$dbman->table_exists('amto_certificates')) {
+        $sql = "CREATE TABLE {amto_certificates} (
+            id BIGINT(10) NOT NULL AUTO_INCREMENT,
+            cert_no VARCHAR(100) NOT NULL,
+            verification_code VARCHAR(100) NOT NULL,
+            userid BIGINT(10) NOT NULL DEFAULT 0,
+            username VARCHAR(100) NOT NULL,
+            fullname VARCHAR(200) NOT NULL,
+            program_name VARCHAR(255) NOT NULL,
+            batch_code VARCHAR(80) NOT NULL,
+            amel_category VARCHAR(100) NOT NULL DEFAULT 'CASR Part 147 Approved Training',
+            final_score INT(10) NOT NULL DEFAULT 88,
+            attendance_pct INT(10) NOT NULL DEFAULT 100,
+            issue_date VARCHAR(30) NOT NULL,
+            expiry_date VARCHAR(30) NOT NULL,
+            issued_by VARCHAR(150) NOT NULL DEFAULT 'Iman Setiawan (R05 Certification Officer)',
+            status VARCHAR(40) NOT NULL DEFAULT 'VALID',
+            timecreated BIGINT(10) NOT NULL DEFAULT 0,
+            PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        $DB->execute($sql);
+    }
+
     amto_sync_cross_db();
 }
 
@@ -259,7 +349,7 @@ function amto_sync_cross_db(bool $force = false): void {
 
             $tstat = strtoupper((string)$tr->reg_status);
             $mstat = 'pending';
-            if (in_array($tstat, ['APPROVED', 'VERIFIED', 'PAID', 'ACTIVE', 'ENROLLED'], true)) {
+            if (in_array($tstat, ['ACCEPTED', 'APPROVED', 'VERIFIED', 'PAID', 'ACTIVE', 'ENROLLED'], true)) {
                 $mstat = 'approved';
             } else if (in_array($tstat, ['REJECTED', 'CANCELLED'], true)) {
                 $mstat = 'rejected';
@@ -397,6 +487,105 @@ function amto_sync_cross_db(bool $force = false): void {
                 );
             }
         }
+
+        // --- C. 2-WAY SYNC: EXAMS (tatc_web.exams <-> moodle.mdl_amto_exams) ---
+        $tatc_exams = $DB->get_records_sql("
+            SELECT e.id, e.code, e.name, e.type, e.passing_grade, p.name AS program_name
+              FROM tatc_web.exams e
+              LEFT JOIN tatc_web.programs p ON p.id = e.program_id
+        ");
+        foreach ($tatc_exams as $te) {
+            $ecode = trim((string)$te->code);
+            if ($ecode === '') {
+                continue;
+            }
+            $exists_me = $DB->get_record('amto_exams', ['exam_code' => $ecode]);
+            if (!$exists_me) {
+                $ne = new stdClass();
+                $ne->exam_code     = $ecode;
+                $ne->title         = $te->name;
+                $ne->category_type = !empty($te->program_name) ? $te->program_name : 'Basic License';
+                $ne->batch_code    = 'BATCH-AMTO-2601';
+                $ne->exam_type     = ($te->type === 'PRACTICAL') ? 'Practical Assessment (Hangar)' : 'Written CBT (Multiple Choice)';
+                $ne->passing_grade = !empty($te->passing_grade) ? (int)$te->passing_grade : 75;
+                $ne->duration_mins = 60;
+                $ne->exam_date     = date('Y-m-d', strtotime('+7 days'));
+                $ne->assessor_name = 'Capt. Hendra Wijaya';
+                $ne->status        = 'Active';
+                $ne->timecreated   = time();
+                $DB->insert_record('amto_exams', $ne);
+            }
+        }
+
+        $moodle_exams = $DB->get_records('amto_exams');
+        foreach ($moodle_exams as $me) {
+            $ecode = trim((string)$me->exam_code);
+            if ($ecode === '') {
+                continue;
+            }
+            $exists_te = $DB->get_records_sql("SELECT id FROM tatc_web.exams WHERE code = ? LIMIT 1", [$ecode]);
+            if (empty($exists_te)) {
+                $prog_rows = $DB->get_records_sql("SELECT id FROM tatc_web.programs ORDER BY id ASC LIMIT 1");
+                $prog_id = !empty($prog_rows) ? (int)reset($prog_rows)->id : null;
+                $ttype = (stripos($me->exam_type, 'Practical') !== false) ? 'PRACTICAL' : 'THEORY';
+                $DB->execute(
+                    "INSERT IGNORE INTO tatc_web.exams (program_id, code, name, type, passing_grade, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, NOW(), NOW())",
+                    [$prog_id, $ecode, $me->title, $ttype, (int)$me->passing_grade]
+                );
+            }
+        }
+
+        // --- D. 2-WAY SYNC: MODULES / MATERI REPOSITORY (tatc_web.modules <-> moodle.mdl_amto_repository) ---
+        $tatc_mods = $DB->get_records_sql("
+            SELECT id, code, name, description, created_at
+              FROM tatc_web.modules
+             WHERE deleted_at IS NULL AND created_at >= '2026-11-23 22:00:00'
+        ");
+        foreach ($tatc_mods as $tm) {
+            $mcode = trim((string)$tm->code);
+            if ($mcode === '') {
+                continue;
+            }
+            $exists_mr = $DB->get_record('amto_repository', ['module_code' => $mcode]);
+            if (!$exists_mr) {
+                $nm = new stdClass();
+                $nm->module_code   = $mcode;
+                $nm->title         = $tm->name;
+                $nm->category_type = 'Basic License Cat B1';
+                $nm->batch_code    = 'Semua Batch';
+                $nm->file_type     = 'PDF Training Manual';
+                $nm->file_path     = '';
+                $nm->file_size     = 'Dokumen Digital';
+                $nm->file_hash     = '';
+                $nm->doc_version   = 'Rev. 01 - 2026';
+                $nm->description   = $tm->description ?: 'Modul materi pelatihan disinkronkan dari Portal Web TATC.';
+                $nm->uploaded_by   = 2;
+                $nm->uploader_name = 'Admin TATC';
+                $nm->status        = 'Published';
+                $nm->timecreated   = time();
+                $DB->insert_record('amto_repository', $nm);
+            }
+        }
+
+        $moodle_mods = $DB->get_records('amto_repository');
+        foreach ($moodle_mods as $mm) {
+            if (strtolower((string)$mm->status) === 'voided') {
+                continue;
+            }
+            $mcode = trim((string)$mm->module_code);
+            if ($mcode === '') {
+                continue;
+            }
+            $exists_tm = $DB->get_records_sql("SELECT id FROM tatc_web.modules WHERE code = ? LIMIT 1", [$mcode]);
+            if (empty($exists_tm)) {
+                $DB->execute(
+                    "INSERT IGNORE INTO tatc_web.modules (code, name, description, status, created_at, updated_at)
+                     VALUES (?, ?, ?, 'ACTIVE', NOW(), NOW())",
+                    [$mcode, $mm->title, $mm->description ?: ($mm->category_type . ' – ' . $mm->batch_code)]
+                );
+            }
+        }
     } catch (Throwable $e) {
         debugging('AMTO Cross-DB Sync warning: ' . $e->getMessage(), DEBUG_DEVELOPER);
     }
@@ -507,9 +696,38 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         }
     }
 
+    $email_role_map = [
+        'peserta@tatc.id'    => 'r01_trainee',
+        'instruktur@tatc.id' => 'r02_instructor',
+        'assessor@tatc.id'   => 'r03_assessor',
+        'tm@tatc.id'         => 'r04_trainingmanager',
+        'cert@tatc.id'       => 'r05_certofficer',
+        'qa@tatc.id'         => 'r06_qa',
+        'manajemen@tatc.id'  => 'r08_management',
+    ];
+
     if (!$target_user) {
-        // Auto-provision a new Moodle account for this tatcwebreact user
-        $base_uname = preg_replace('/[^a-z0-9]/', '', strtolower(explode('@', $email)[0]));
+        // Check if this participant has an APPROVED registration in mdl_amto_registrations
+        $approved_reg = $DB->get_record_select(
+            'amto_registrations',
+            'LOWER(email) = :e AND status = \'approved\'',
+            ['e' => $email],
+            '*',
+            IGNORE_MULTIPLE
+        );
+
+        // Only auto-provision Moodle account if user is one of the core RBAC accounts, non-student staff, or has an approved registration
+        $can_provision = isset($email_role_map[$email]) || in_array($tatc_role, ['SUPERADMIN', 'ADMIN', 'INSTRUKTUR', 'INSTRUCTOR'], true) || !empty($approved_reg);
+        if (!$can_provision) {
+            if (isloggedin() && !isguestuser()) {
+                require_logout();
+            }
+            return null;
+        }
+
+        $base_uname = !empty($approved_reg->username)
+            ? preg_replace('/[^a-z0-9_.-]/', '', strtolower($approved_reg->username))
+            : preg_replace('/[^a-z0-9]/', '', strtolower(explode('@', $email)[0]));
         if ($base_uname === '' || $base_uname === 'admin' || $base_uname === 'guest') {
             $base_uname = 'tatcuser';
         }
@@ -520,7 +738,7 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
             $idx++;
         }
 
-        $display = trim($name) !== '' ? trim($name) : ucfirst($base_uname);
+        $display = !empty($approved_reg->fullname) ? trim($approved_reg->fullname) : (trim($name) !== '' ? trim($name) : ucfirst($base_uname));
         $parts = preg_split('/\s+/', $display, 2);
         $firstname = $parts[0] ?? $display;
         $lastname = (!empty($parts[1])) ? $parts[1] : 'TATC';
@@ -543,7 +761,7 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         $nu->suspended = 0;
         $nu->mnethostid = $CFG->mnet_localhost_id;
         $nu->username = $uname;
-        $nu->password = hash_internal_user_password($initial_plain_pass);
+        $nu->password = (!empty($approved_reg->password_hash)) ? $approved_reg->password_hash : hash_internal_user_password($initial_plain_pass);
         $nu->firstname = $firstname;
         $nu->lastname = $lastname;
         $nu->email = $email;
@@ -570,15 +788,6 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
             "SELECT r.shortname FROM {role_assignments} ra JOIN {role} r ON r.id = ra.roleid WHERE ra.userid = ?",
             [$target_user->id]
         );
-        $email_role_map = [
-            'peserta@tatc.id'    => 'r01_trainee',
-            'instruktur@tatc.id' => 'r02_instructor',
-            'assessor@tatc.id'   => 'r03_assessor',
-            'tm@tatc.id'         => 'r04_trainingmanager',
-            'cert@tatc.id'       => 'r05_certofficer',
-            'qa@tatc.id'         => 'r06_qa',
-            'manajemen@tatc.id'  => 'r08_management',
-        ];
         if (isset($email_role_map[$email])) {
             $desired_short = $email_role_map[$email];
             $role_rec = $DB->get_record('role', ['shortname' => $desired_short]);
@@ -646,20 +855,10 @@ function amto_auto_sync_from_tatc_cookie(): void {
     $tatc_email = strtolower(trim($cookie_data['email']));
     $tatc_role = strtoupper(trim($cookie_data['role'] ?? 'PESERTA'));
 
-    // Check if current Moodle user differs from the active tatcwebreact cookie user
+    // Check if a new login token was set on tatcwebreact
     $need_switch = false;
     if ($last_synced !== $token_raw) {
         $need_switch = true;
-    } else if (!isloggedin() || isguestuser()) {
-        $need_switch = true;
-    } else {
-        if ($tatc_email === 'admin@tatc.id' && $USER->username !== 'admin') {
-            $need_switch = true;
-        } else if ($tatc_email !== 'admin@tatc.id' && (strtolower($USER->email ?? '') !== $tatc_email || $USER->username === 'admin')) {
-            $need_switch = true;
-        } else if (strpos((string)($USER->lastname ?? ''), '(') === 0) {
-            $need_switch = true;
-        }
     }
 
     if ($need_switch) {
@@ -1216,15 +1415,21 @@ function amto_render_operational_dashboard(): string {
                     <a href="/amto/repository.php" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:700;">
                         <span>Unggah Modul Repository</span>
                     </a>
+                    <a href="/amto/ujian_logbook.php?tab=logbook" class="tatc-btn-outline" style="background:rgba(255,255,255,0.15); color:#ffffff !important; border-color:rgba(255,255,255,0.3);">
+                        <span>Verifikasi Logbook &amp; Ujian</span>
+                    </a>
                     <a href="/amto/jadwal.php" class="tatc-btn-outline" style="background:rgba(255,255,255,0.15); color:#ffffff !important; border-color:rgba(255,255,255,0.3);">
-                        <span>Jadwal Mengajar &amp; Ruangan</span>
+                        <span>Jadwal Mengajar</span>
                     </a>
                 <?php else: ?>
                     <a href="/amto/repository.php" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:700;">
-                        <span>Buka Modul Materi (Repository)</span>
+                        <span>Kelas &amp; Modul Materi</span>
                     </a>
-                    <a href="/amto/jadwal.php" class="tatc-btn-outline" style="background:rgba(255,255,255,0.15); color:#ffffff !important; border-color:rgba(255,255,255,0.3);">
-                        <span>Jadwal Batch Pelatihan</span>
+                    <a href="/amto/ujian_logbook.php?tab=ujian" class="tatc-btn-outline" style="background:rgba(255,255,255,0.15); color:#ffffff !important; border-color:rgba(255,255,255,0.3);">
+                        <span>Ujian CBT &amp; Logbook</span>
+                    </a>
+                    <a href="/amto/sertifikat.php" class="tatc-btn-outline" style="background:rgba(255,255,255,0.15); color:#ffffff !important; border-color:rgba(255,255,255,0.3);">
+                        <span>Sertifikat Saya</span>
                     </a>
                 <?php endif; ?>
             </div>
@@ -1333,111 +1538,6 @@ function amto_render_operational_dashboard(): string {
             </div>
         </div>
         <?php endif; ?>
-
-        <!-- OPERATIONAL SUMMARY PANELS: JADWAL TERDEKAT & AKTIVITAS / MATERI TERBARU -->
-        <div class="tatc-dash-grid-2">
-            <!-- LEFT PANEL: JADWAL PELATIHAN TERDEKAT -->
-            <div class="tatc-panel" style="margin-bottom:0;">
-                <div class="tatc-panel-header">
-                    <div>
-                        <h2 class="tatc-panel-title">Jadwal &amp; Batch Pelatihan Terdekat</h2>
-                        <p class="tatc-panel-sub">Daftar pelaksanaan kelas teori (Classroom) dan praktik (Hangar) terdekat.</p>
-                    </div>
-                    <a href="/amto/jadwal.php" class="tatc-btn-outline" style="padding:6px 12px; font-size:12px;">Lihat Semua Jadwal</a>
-                </div>
-                <?php if (empty($schedules)): ?>
-                    <p class="text-muted" style="font-size:13.5px;">Belum ada jadwal batch yang terdaftar.</p>
-                <?php else: ?>
-                    <div class="tatc-table-wrap">
-                        <table class="tatc-table">
-                            <thead>
-                                <tr>
-                                    <th>Batch &amp; Program</th>
-                                    <th>Ruangan &amp; Instruktur</th>
-                                    <th>Mulai</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php
-                                $count_s = 0;
-                                foreach ($schedules as $s):
-                                    if ($count_s++ >= 3) break;
-                                ?>
-                                <tr>
-                                    <td>
-                                        <strong style="color:#b91c1c; font-size:12.5px;"><?php echo s($s->batch_code); ?></strong>
-                                        <div style="font-weight:700; font-size:13px; color:#0f172a;"><?php echo s($s->program_name); ?></div>
-                                    </td>
-                                    <td>
-                                        <div style="font-size:12.5px; font-weight:600;"><?php echo s($s->room_location); ?></div>
-                                        <div style="font-size:11.5px; color:#64748b;"><?php echo s($s->instructor_name); ?></div>
-                                    </td>
-                                    <td style="font-size:12.5px; font-weight:600; white-space:nowrap;"><?php echo s($s->start_date); ?></td>
-                                    <td>
-                                        <span class="tatc-badge <?php echo ($s->status === 'Open Registration') ? 'tatc-badge-open' : 'tatc-badge-ongoing'; ?>">
-                                            <?php echo s($s->status); ?>
-                                        </span>
-                                    </td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                <?php endif; ?>
-            </div>
-
-            <!-- RIGHT PANEL: ROLE-SPECIFIC QUICK PANEL (REGISTRATIONS / REPOSITORY) -->
-            <div class="tatc-panel" style="margin-bottom:0;">
-                <div class="tatc-panel-header">
-                    <div>
-                        <h2 class="tatc-panel-title">
-                            <?php echo ($group === 'admin') ? 'Ringkasan Registrasi & Repository Terbaru' : 'Akses Cepat LMS Repository & Kurikulum'; ?>
-                        </h2>
-                        <p class="tatc-panel-sub">
-                            <?php echo ($group === 'admin') ? 'Pintasan cepat pengelolaan operasional Bulan 1–2.' : 'Kategori modul pelatihan resmi CASR Part 147 TATC – AMTO.'; ?>
-                        </p>
-                    </div>
-                    <a href="/amto/repository.php" class="tatc-btn-outline" style="padding:6px 12px; font-size:12px;">Buka Repository</a>
-                </div>
-
-                <div style="display:flex; flex-direction:column; gap:10px;">
-                    <?php if ($group === 'admin'): ?>
-                        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc;">
-                            <div>
-                                <div style="font-weight:700; font-size:13.5px; color:#0f172a;">Meja Verifikasi Pendaftaran Peserta</div>
-                                <div style="font-size:12px; color:#64748b;"><?php echo $pending_regs; ?> pendaftar menunggu verifikasi berkas, <?php echo $approved_regs; ?> telah aktif.</div>
-                            </div>
-                            <a href="/amto/registrasi.php" class="tatc-btn-red" style="padding:7px 14px; font-size:12px;">Buka Verifikasi</a>
-                        </div>
-                    <?php else: ?>
-                        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc;">
-                            <div>
-                                <div style="font-weight:700; font-size:13.5px; color:#0f172a;"> Data &amp; Status Registrasi Peserta</div>
-                                <div style="font-size:12px; color:#64748b;">Periksa bukti pendaftaran dan berkas prasyarat pelatihan Anda.</div>
-                            </div>
-                            <a href="/amto/registrasi.php" class="tatc-btn-outline" style="padding:7px 14px; font-size:12px;">Lihat Data Saya</a>
-                        </div>
-                    <?php endif; ?>
-
-                    <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc;">
-                        <div>
-                            <div style="font-weight:700; font-size:13.5px; color:#0f172a;">Katalog Modul LMS Repository (CASR Part 147)</div>
-                            <div style="font-size:12px; color:#64748b;">Basic License Cat A, Cat B1, Cat B2, Aircraft Type Rating, &amp; Mandatory Training.</div>
-                        </div>
-                        <a href="/amto/repository.php" class="tatc-btn-outline" style="padding:7px 14px; font-size:12px;">Lihat Modul</a>
-                    </div>
-
-                    <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc;">
-                        <div>
-                            <div style="font-weight:700; font-size:13.5px; color:#0f172a;">Kalender Akademik &amp; Sesi Pelatihan</div>
-                            <div style="font-size:12px; color:#64748b;">Lihat jadwal bulanan sesi kelas teori dan praktik hangar TATC.</div>
-                        </div>
-                        <a href="/calendar/view.php?view=month" class="tatc-btn-outline" style="padding:7px 14px; font-size:12px;">Buka Kalender</a>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
     <?php
     return ob_get_clean();
