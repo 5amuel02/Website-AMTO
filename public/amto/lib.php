@@ -812,8 +812,8 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         // Look up non-admin user by email or mapped official username first
         $candidates = $DB->get_records_select(
             'user',
-            '(LOWER(email) = :e OR (:e2 = \'imanjanuar44@gmail.com\' AND username IN (\'imanjm\', \'certofficer\'))) AND deleted = 0 AND mnethostid = :m AND username <> \'admin\'',
-            ['e' => $email, 'e2' => $email, 'm' => $CFG->mnet_localhost_id],
+            '(LOWER(email) = :e OR (:e2 = \'imanjanuar44@gmail.com\' AND username IN (\'imanjm\', \'certofficer\')) OR (:e3 = \'anggarusdinar@telkomuniversity.ac.id\' AND username IN (\'anggarusdinar\', \'management\'))) AND deleted = 0 AND mnethostid = :m AND username <> \'admin\'',
+            ['e' => $email, 'e2' => $email, 'e3' => $email, 'm' => $CFG->mnet_localhost_id],
             'id ASC'
         );
         if (!empty($candidates)) {
@@ -824,22 +824,29 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
                 $target_user->firstname = 'Iman';
                 $target_user->lastname  = 'Januar M';
                 $DB->update_record('user', $target_user);
+            } else if ($email === 'anggarusdinar@telkomuniversity.ac.id' && ($target_user->username !== 'anggarusdinar' || strtolower($target_user->email) !== 'anggarusdinar@telkomuniversity.ac.id')) {
+                $target_user->username  = 'anggarusdinar';
+                $target_user->email     = 'anggarusdinar@telkomuniversity.ac.id';
+                $target_user->firstname = 'Angga';
+                $target_user->lastname  = 'Rusdinar';
+                $DB->update_record('user', $target_user);
             }
         }
     }
 
     $email_role_map = [
-        'peserta@tatc.id'        => 'r01_trainee',
-        'instruktur@tatc.id'     => 'r02_instructor',
-        'assessor@tatc.id'       => 'r03_assessor',
-        'tm@tatc.id'             => 'r04_trainingmanager',
-        'imanjanuar44@gmail.com' => 'r05_certofficer',
-        'cert@tatc.id'           => 'r05_certofficer',
-        'qa@tatc.id'             => 'r06_qa',
-        'umismd@gmail.com'       => 'r06_qa',
-        'asfriyantot@gmail.com'  => 'r06_qa',
-        'indset69@gmail.com'     => 'r06_qa',
-        'manajemen@tatc.id'      => 'r08_management',
+        'peserta@tatc.id'                      => 'r01_trainee',
+        'instruktur@tatc.id'                   => 'r02_instructor',
+        'assessor@tatc.id'                     => 'r03_assessor',
+        'tm@tatc.id'                           => 'r04_trainingmanager',
+        'imanjanuar44@gmail.com'               => 'r05_certofficer',
+        'cert@tatc.id'                         => 'r05_certofficer',
+        'qa@tatc.id'                           => 'r06_qa',
+        'umismd@gmail.com'                     => 'r06_qa',
+        'asfriyantot@gmail.com'                => 'r06_qa',
+        'indset69@gmail.com'                   => 'r06_qa',
+        'anggarusdinar@telkomuniversity.ac.id' => 'r08_management',
+        'manajemen@tatc.id'                    => 'r08_management',
     ];
 
     if (!$target_user) {
@@ -880,18 +887,19 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         $lastname = (!empty($parts[1])) ? $parts[1] : 'TATC';
 
         $official_test_passwords = [
-            'peserta@tatc.id'        => 'Admin123@2',
-            'instruktur@tatc.id'     => 'Admin123@2',
-            'assessor@tatc.id'       => 'Admin123@2',
-            'tm@tatc.id'             => 'Admin123@2',
-            'imanjanuar44@gmail.com' => 'Imanjanuar12345',
-            'cert@tatc.id'           => 'Imanjanuar12345',
-            'qa@tatc.id'             => 'Admin123@2',
-            'umismd@gmail.com'       => 'Umi12345',
-            'asfriyantot@gmail.com'  => 'Teguhasfriyanto12345',
-            'indset69@gmail.com'     => 'Idra12345',
-            'admin@tatc.id'          => 'Admin123@2',
-            'manajemen@tatc.id'      => 'Admin123@2',
+            'peserta@tatc.id'                      => 'Admin123@2',
+            'instruktur@tatc.id'                   => 'Admin123@2',
+            'assessor@tatc.id'                     => 'Admin123@2',
+            'tm@tatc.id'                           => 'Admin123@2',
+            'imanjanuar44@gmail.com'               => 'Imanjanuar12345',
+            'cert@tatc.id'                         => 'Imanjanuar12345',
+            'qa@tatc.id'                           => 'Admin123@2',
+            'umismd@gmail.com'                     => 'Umi12345',
+            'asfriyantot@gmail.com'                => 'Teguhasfriyanto12345',
+            'indset69@gmail.com'                   => 'Idra12345',
+            'admin@tatc.id'                        => 'Admin123@2',
+            'anggarusdinar@telkomuniversity.ac.id' => 'anggarusdinar12345',
+            'manajemen@tatc.id'                    => 'anggarusdinar12345',
         ];
         // [SEC-SSO-03] IAM-03: Gunakan password kriptografis acak untuk akun SSO baru di luar 8 akun uji resmi
         $initial_plain_pass = $official_test_passwords[$email]

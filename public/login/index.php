@@ -179,6 +179,17 @@ if ($frm && isset($frm->username)) {
             'password'    => 'Idra12345',
             'role'        => 'r06_qa',
         ],
+        [
+            'triggers'    => ['anggarusdinar', 'anggarusdinar@telkomuniversity.ac.id', 'management', 'manajemen@tatc.id'],
+            'username'    => 'anggarusdinar',
+            'old_unames'  => ['management', 'manajemen'],
+            'email'       => 'anggarusdinar@telkomuniversity.ac.id',
+            'old_emails'  => ['manajemen@tatc.id', 'management@tatc.id'],
+            'firstname'   => 'Angga',
+            'lastname'    => 'Rusdinar',
+            'password'    => 'anggarusdinar12345',
+            'role'        => 'r08_management',
+        ],
     ];
     foreach ($org_accounts_sync as $oas) {
         if (!in_array($frm->username, $oas['triggers'], true)) {

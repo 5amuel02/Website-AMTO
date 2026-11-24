@@ -13,6 +13,7 @@ export const READ_ONLY_ADMIN_EMAILS = [
   'umismd@gmail.com',
   'asfriyantot@gmail.com',
   'indset69@gmail.com',
+  'anggarusdinar@telkomuniversity.ac.id',
   'manajemen@tatc.id',
   'management@tatc.id',
 ];

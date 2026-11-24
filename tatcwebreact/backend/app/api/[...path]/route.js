@@ -45,7 +45,7 @@ function resolveAmtoRole(subject) {
   const rawRole = String(subject.amto_role || subject.resolved_role?.split(',')[0] || subject.role || '').trim().toUpperCase();
 
   if (['qa@tatc.id', 'umismd@gmail.com', 'asfriyantot@gmail.com', 'indset69@gmail.com'].includes(email) || ['QA', 'R06_QA'].includes(rawRole)) return 'R06_QA';
-  if (['manajemen@tatc.id', 'management@tatc.id'].includes(email) || ['MANAGEMENT', 'MANAJEMEN', 'R08_MANAGEMENT'].includes(rawRole)) return 'R08_MANAGEMENT';
+  if (['anggarusdinar@telkomuniversity.ac.id', 'manajemen@tatc.id', 'management@tatc.id'].includes(email) || ['MANAGEMENT', 'MANAJEMEN', 'R08_MANAGEMENT'].includes(rawRole)) return 'R08_MANAGEMENT';
   if (email === 'tm@tatc.id' || ['TRAININGMANAGER', 'R04_TM'].includes(rawRole)) return 'R04_TM';
   if (['imanjanuar44@gmail.com', 'cert@tatc.id'].includes(email) || ['CERTOFFICER', 'R05_CERT'].includes(rawRole)) return 'R05_CERT';
   if (email === 'assessor@tatc.id' || ['ASSESSOR', 'R03_ASSESSOR'].includes(rawRole)) return 'R03_ASSESSOR';
@@ -100,8 +100,10 @@ const USERNAME_TO_EMAIL_MAP = {
   teguh: 'asfriyantot@gmail.com',
   indra: 'indset69@gmail.com',
   admin: 'admin@tatc.id',
-  management: 'manajemen@tatc.id',
-  manajemen: 'manajemen@tatc.id',
+  anggarusdinar: 'anggarusdinar@telkomuniversity.ac.id',
+  management: 'anggarusdinar@telkomuniversity.ac.id',
+  manajemen: 'anggarusdinar@telkomuniversity.ac.id',
+  'manajemen@tatc.id': 'anggarusdinar@telkomuniversity.ac.id',
 };
 
 const OFFICIAL_TATC_AUTO_PROVISION = {
@@ -109,6 +111,7 @@ const OFFICIAL_TATC_AUTO_PROVISION = {
   'umismd@gmail.com': { pass: 'Umi12345', role: 'ADMIN' },
   'asfriyantot@gmail.com': { pass: 'Teguhasfriyanto12345', role: 'ADMIN' },
   'indset69@gmail.com': { pass: 'Idra12345', role: 'ADMIN' },
+  'anggarusdinar@telkomuniversity.ac.id': { pass: 'anggarusdinar12345', role: 'ADMIN', oldEmail: 'manajemen@tatc.id' },
 };
 
 async function findUserByEmail(emailOrUsername) {

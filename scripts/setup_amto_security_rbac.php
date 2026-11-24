@@ -206,12 +206,15 @@ $test_accounts = [
         'courserole'=> 'editingteacher',
     ],
     [
-        'username'  => 'management',
-        'email'     => 'manajemen@tatc.id',
-        'firstname' => 'Ir. Angga',
-        'lastname'  => 'Dirgantara',
-        'role'      => 'r08_management',
-        'courserole'=> null,
+        'username'      => 'anggarusdinar',
+        'old_usernames' => ['management', 'manajemen'],
+        'email'         => 'anggarusdinar@telkomuniversity.ac.id',
+        'old_emails'    => ['manajemen@tatc.id', 'management@tatc.id'],
+        'password'      => 'anggarusdinar12345',
+        'firstname'     => 'Angga',
+        'lastname'      => 'Rusdinar',
+        'role'          => 'r08_management',
+        'courserole'    => null,
     ],
 ];
 
