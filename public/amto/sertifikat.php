@@ -10,6 +10,11 @@ amto_auto_sync_from_tatc_cookie();
 require_login();
 amto_ensure_tables();
 
+header('X-Frame-Options: SAMEORIGIN');
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+header('Cache-Control: private, no-store, no-cache, must-revalidate');
+
 global $DB, $USER, $PAGE, $OUTPUT;
 
 $context = context_system::instance();
@@ -91,7 +96,30 @@ if ($is_student) {
 }
 
 $schedules = $DB->get_records('amto_schedules', null, 'start_date ASC');
-$preview_cert = ($preview_id > 0) ? $DB->get_record('amto_certificates', ['id' => $preview_id]) : reset($certificates);
+
+// [SEC-Samuel-02] SCP-01 & APP-02: Penegakan Record Ownership Check (Anti-IDOR) pada parameter ?preview=ID
+$preview_cert = null;
+if ($preview_id > 0) {
+    $candidate_cert = $DB->get_record('amto_certificates', ['id' => $preview_id]);
+    if ($candidate_cert) {
+        $is_cert_owner = ((int)$candidate_cert->userid === (int)$USER->id) ||
+                         (strtolower(trim((string)$candidate_cert->username)) === strtolower(trim((string)$USER->username)));
+        if ($is_student && !$is_cert_owner) {
+            amto_log_audit_event(
+                'UNAUTHORIZED_CERT_ACCESS',
+                'amto_certificates',
+                (int)$preview_id,
+                "Denied IDOR preview on cert_no={$candidate_cert->cert_no}",
+                "Peserta {$USER->username} mencoba mengakses preview sertifikat milik {$candidate_cert->username} (SCP-01)."
+            );
+            http_response_code(403);
+            throw new moodle_exception('nopermissions', 'error', '', 'Akses Ditolak (SCP-01): Anda tidak memiliki hak akses untuk melihat E-Sertifikat milik peserta lain.');
+        }
+        $preview_cert = $candidate_cert;
+    }
+} else {
+    $preview_cert = !empty($certificates) ? reset($certificates) : null;
+}
 
 echo $OUTPUT->header();
 echo amto_render_shared_styles();
