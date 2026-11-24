@@ -10,6 +10,11 @@ amto_auto_sync_from_tatc_cookie();
 require_login();
 amto_ensure_tables();
 
+header('X-Frame-Options: SAMEORIGIN');
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+header('Cache-Control: private, no-store, no-cache, must-revalidate');
+
 global $DB, $USER, $PAGE, $OUTPUT;
 
 $context = context_system::instance();
@@ -58,6 +63,30 @@ function amto_save_media_upload(string $field, string $prefix, array $allowed_ex
     $tmp_path = $_FILES[$field]['tmp_name'];
     if (!is_uploaded_file($tmp_path)) {
         return '';
+    }
+    // [SEC-Samuel-03] DP-06 & APP-06: Validasi MIME biner asli menggunakan finfo_file untuk mencegah MIME Spoofing
+    $allowed_mimes = [
+        'application/pdf',
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/gif',
+        'application/zip',
+        'application/x-zip-compressed',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ];
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $detected_mime = $finfo ? finfo_file($finfo, $tmp_path) : '';
+        if ($finfo) {
+            finfo_close($finfo);
+        }
+        if ($detected_mime !== '' && !in_array($detected_mime, $allowed_mimes, true)) {
+            return '';
+        }
     }
     $upload_dir = __DIR__ . '/repository_files';
     if (!is_dir($upload_dir)) {
@@ -302,15 +331,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // 2C. Admin/Teacher deletes an Assignment
+    // 2C. Admin/Teacher voids an Assignment (SEC-05 Soft-Delete / Void — preserve student submissions for audit trail)
     if ($action === 'delete_assignment' && $can_manage_exam) {
         $assign_id = required_param('assign_id', PARAM_INT);
         $a = $DB->get_record('amto_assignments', ['id' => $assign_id]);
         if ($a) {
             $a->status = 'Voided';
             $DB->update_record('amto_assignments', $a);
-            $DB->delete_records('amto_assignment_submissions', ['assignment_id' => $assign_id]);
-            header('Location: /amto/ujian_logbook.php?tab=assignment&msg=' . urlencode("Assignment \"{$a->title}\" telah dihapus."));
+            amto_log_audit_event('ASSIGNMENT_VOID', 'amto_assignments', (int)$assign_id, 'status=Voided', "Assignment [{$a->title}] voided by " . fullname($USER) . " (SEC-05 Soft-Delete)");
+            header('Location: /amto/ujian_logbook.php?tab=assignment&msg=' . urlencode("Assignment \"{$a->title}\" telah dinonaktifkan (Voided - SEC-05) tanpa menghapus histori pengumpulan peserta."));
             exit;
         }
     }
@@ -486,16 +515,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $exam_id = required_param('exam_id', PARAM_INT);
         $e = $DB->get_record('amto_exams', ['id' => $exam_id]);
         if ($e) {
+            // [SEC-Samuel-03] SEC-05: Larangan Hard-Delete pada rekam hasil nilai ujian & bank soal — gunakan Soft-Delete / Void (status = 'Voided')
             $e->status = 'Voided';
             $DB->update_record('amto_exams', $e);
-            $DB->delete_records('amto_exam_results', ['exam_id' => $exam_id]);
-            $DB->delete_records('amto_exam_questions', ['exam_id' => $exam_id]);
-            try {
-                $DB->execute("DELETE FROM tatc_web.exams WHERE code = ?", [$e->exam_code]);
-            } catch (Throwable $err) {
-            }
-            amto_log_audit_event('EXAM_VOID', 'amto_exams', (int)$exam_id, 'status=Voided', "Exam [{$e->exam_code}] voided by " . fullname($USER));
-            header('Location: /amto/ujian_logbook.php?tab=ujian&msg=' . urlencode("Quiz / Ujian [{$e->exam_code}] {$e->title} beserta soal & nilai terkait telah dihapus."));
+            amto_log_audit_event('EXAM_VOID', 'amto_exams', (int)$exam_id, 'status=Voided', "Exam [{$e->exam_code}] voided by " . fullname($USER) . " (SEC-05 Soft-Delete)");
+            header('Location: /amto/ujian_logbook.php?tab=ujian&msg=' . urlencode("Quiz / Ujian [{$e->exam_code}] {$e->title} telah dinonaktifkan (Voided - SEC-05) dengan tetap menyimpan jejak audit nilai."));
             exit;
         }
     }
