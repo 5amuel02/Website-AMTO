@@ -1,7 +1,79 @@
+# ============================================================
+# VENDOR LIBRARIES - Moodle third-party (jangan di-track)
+# ============================================================
+public/lib/google2-service/
+public/lib/aws-sdk/
+public/lib/yuilib/
+public/lib/phpspreadsheet/
+public/lib/giggsey/
+public/lib/htmlpurifier/
+public/lib/openspout/
+public/lib/google/
+public/lib/guzzlehttp/
+public/lib/monolog/
+public/lib/adodb/
+public/lib/php-di/
+public/lib/psr/
+public/lib/yui/
+public/lib/tcpdf/
+public/lib/slim/
+public/lib/phpmailer/
+public/lib/google2-auth/
+public/lib/scssphp/
+public/lib/simplepie/
+public/lib/pear/
+public/lib/ltiprovider/
+public/lib/php-css-parser/
+public/lib/maxmind/
+public/lib/lti1p3/
+public/lib/mustache/
+public/lib/phpxmlrpc/
+public/lib/jquery/
+public/lib/zipstream/
+public/lib/xhprof/
+public/lib/nikic/
+public/lib/composer/
+public/lib/minify/
+public/lib/plist/
+public/lib/webauthn/
+public/lib/laravel/
+public/lib/jmespath/
+public/lib/php-jwt/
+public/lib/bennu/
+public/lib/geopattern-php/
+public/lib/rtlcss/
+public/lib/spatie/
+public/lib/ralouphie/
+public/lib/html2text/
+public/lib/symfony/
+public/lib/requirejs/
+public/lib/markdown/
+public/lib/google2/
+public/lib/emoji-data/
+public/lib/polyfills/
 
-# TATC Web React build & dependency folders
+# ============================================================
+# TATC React Web - build & dependency folders
+# ============================================================
 tatcwebreact/node_modules/
 tatcwebreact/backend/node_modules/
 tatcwebreact/backend/.next/
 tatcwebreact/dist/
+tatcwebreact/.env
+tatcwebreact/backend/.env
 
+# ============================================================
+# Moodle runtime & local config
+# ============================================================
+local/
+moodledata/
+public/cache/
+public/localcache/
+
+# ============================================================
+# OS & editor
+# ============================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/settings.json
