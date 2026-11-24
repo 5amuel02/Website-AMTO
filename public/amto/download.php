@@ -56,8 +56,21 @@ if ($type === 'reg') {
     }
 
     $filename = basename($rel_path);
-    $fullpath = __DIR__ . '/uploads/' . $filename;
-    if (!is_file($fullpath)) {
+    $candidate_paths = [
+        __DIR__ . '/uploads/' . $filename,
+        'C:/Users/Asus Tuf Gaming/tatcwebreact/backend/public/documents/' . $filename,
+        'C:/Users/Asus Tuf Gaming/tatcwebreact/public/documents/' . $filename,
+        __DIR__ . '/../../tatcwebreact/backend/public/documents/' . $filename,
+        __DIR__ . '/../../tatcwebreact/public/documents/' . $filename,
+    ];
+    $fullpath = '';
+    foreach ($candidate_paths as $cand) {
+        if (is_file($cand)) {
+            $fullpath = $cand;
+            break;
+        }
+    }
+    if ($fullpath === '') {
         http_response_code(404);
         throw new moodle_exception('filenotfound', 'error');
     }

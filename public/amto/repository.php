@@ -10,16 +10,16 @@ $context = context_system::instance();
 $PAGE->set_context($context);
 $PAGE->set_url(new moodle_url('/amto/repository.php'));
 $PAGE->set_pagelayout('standard');
-$PAGE->set_title('TATC Portal – LMS Repository & Modul Materi AMTO');
-$PAGE->set_heading('LMS Repository & Modul Materi Pelatihan');
+$PAGE->set_title('TATC Portal – Kelas & Silabus Materi Pelatihan AMTO');
+$PAGE->set_heading('Kelas & Silabus Materi Pelatihan');
 
 $role = amto_current_role();
 $rbac_role = amto_current_rbac_role();
-$can_manage = in_array($rbac_role, ['admin', 'trainingmanager', 'instructor', 'qa'], true);
+$can_manage = in_array($rbac_role, ['admin', 'trainingmanager', 'instructor', 'assessor'], true);
 
 $action = optional_param('action', '', PARAM_ALPHANUMEXT);
+$class_id = optional_param('class_id', 0, PARAM_INT);
 $cat_filter = optional_param('cat', 'all', PARAM_TEXT);
-$search_q = trim(optional_param('q', '', PARAM_TEXT));
 $msg = optional_param('msg', '', PARAM_TEXT);
 $notice_msg = $msg !== '' ? s($msg) : '';
 $notice_type = 'success';
@@ -29,7 +29,7 @@ function amto_save_repo_file(string $modcode): array {
     if (empty($_FILES['repo_file']['name']) || $_FILES['repo_file']['error'] !== UPLOAD_ERR_OK) {
         return ['path' => '', 'size' => '', 'hash' => ''];
     }
-    $allowed_ext = ['pdf', 'ppt', 'pptx', 'doc', 'docx', 'mp4', 'zip', 'png', 'jpg'];
+    $allowed_ext = ['pdf', 'ppt', 'pptx', 'doc', 'docx', 'mp4', 'zip', 'png', 'jpg', 'jpeg'];
     $allowed_mimes = [
         'application/pdf',
         'application/vnd.ms-powerpoint',
@@ -81,140 +81,531 @@ function amto_save_repo_file(string $modcode): array {
     return ['path' => '', 'size' => '', 'hash' => ''];
 }
 
-// Handle Upload / Delete Actions (for Admin & Instructor only)
+// Handle POST Actions (Teacher / Admin)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage) {
-    // [SEC-FIX-02] APP-01 CSRF Protection via Moodle sesskey validation
     require_sesskey();
 
-    if ($action === 'upload_module') {
-        $module_code = strtoupper(trim(optional_param('module_code', '', PARAM_TEXT)));
+    // 1. TAHAP 1: Buat Wadah Bab Baru (Simpel: Urutan Bab + Judul Topik Bab + Deskripsi Singkat)
+    if ($action === 'create_chapter') {
+        $target_class_id = required_param('target_class_id', PARAM_INT);
+        $batch_code = trim(optional_param('batch_code', '', PARAM_TEXT));
+        $chapter_no = trim(optional_param('chapter_no', 'Bab 1', PARAM_TEXT));
         $title = trim(optional_param('title', '', PARAM_TEXT));
-        $category_type = trim(optional_param('category_type', 'Basic License Cat B1', PARAM_TEXT));
-        $batch_code = trim(optional_param('batch_code', 'Semua Batch', PARAM_TEXT));
-        $file_type = trim(optional_param('file_type', 'PDF Training Manual', PARAM_TEXT));
-        $doc_version = trim(optional_param('doc_version', 'Rev. 01 - 2026', PARAM_TEXT));
         $description = trim(optional_param('description', '', PARAM_TEXT));
 
-        if ($module_code !== '' && $title !== '') {
-            $upload_res = amto_save_repo_file($module_code);
+        if ($title !== '') {
+            $ch = new stdClass();
+            $ch->schedule_id = $target_class_id;
+            $ch->batch_code  = $batch_code;
+            $ch->chapter_no  = $chapter_no ?: 'Bab 1';
+            $ch->title       = $title;
+            $ch->description = $description;
+            $ch->status      = 'Active';
+            $ch->timecreated = time();
+            $new_cid = $DB->insert_record('amto_chapters', $ch);
 
+            if (function_exists('amto_log_audit_event')) {
+                amto_log_audit_event('CHAPTER_CREATE', 'amto_chapters', (int)$new_cid, "chapter={$ch->chapter_no}, title={$ch->title}", "Created syllabus chapter in batch {$batch_code}");
+            }
+            $m = "{$ch->chapter_no}: {$ch->title} berhasil dibuat. Sekarang Anda dapat menambahkan Materi atau Ujian di dalam {$ch->chapter_no}.";
+            header('Location: /amto/repository.php?class_id=' . $target_class_id . '&msg=' . urlencode($m));
+            exit;
+        }
+    }
+
+    // 2. Edit Wadah Bab
+    if ($action === 'edit_chapter') {
+        $chapter_id = required_param('chapter_id', PARAM_INT);
+        $target_class_id = required_param('target_class_id', PARAM_INT);
+        $ch = $DB->get_record('amto_chapters', ['id' => $chapter_id]);
+        if ($ch) {
+            $old_cno = $ch->chapter_no;
+            $ch->chapter_no  = trim(optional_param('chapter_no', $ch->chapter_no, PARAM_TEXT));
+            $ch->title       = trim(optional_param('title', $ch->title, PARAM_TEXT));
+            $ch->description = trim(optional_param('description', (string)$ch->description, PARAM_TEXT));
+            $DB->update_record('amto_chapters', $ch);
+
+            // Sync chapter_no on child materials and exams
+            $DB->execute("UPDATE {amto_repository} SET chapter_no = ? WHERE chapter_id = ?", [$ch->chapter_no, $chapter_id]);
+            $DB->execute("UPDATE {amto_exams} SET chapter_no = ? WHERE chapter_id = ?", [$ch->chapter_no, $chapter_id]);
+
+            $m = "Data {$ch->chapter_no} ({$ch->title}) berhasil diperbarui.";
+            header('Location: /amto/repository.php?class_id=' . $target_class_id . '&msg=' . urlencode($m));
+            exit;
+        }
+    }
+
+    // 3. Hapus Wadah Bab
+    if ($action === 'delete_chapter') {
+        $chapter_id = required_param('chapter_id', PARAM_INT);
+        $target_class_id = required_param('target_class_id', PARAM_INT);
+        $ch = $DB->get_record('amto_chapters', ['id' => $chapter_id]);
+        if ($ch) {
+            $ch->status = 'Voided';
+            $DB->update_record('amto_chapters', $ch);
+            $DB->execute("UPDATE {amto_repository} SET status = 'Voided' WHERE chapter_id = ?", [$chapter_id]);
+            $DB->execute("UPDATE {amto_exams} SET status = 'Voided' WHERE chapter_id = ?", [$chapter_id]);
+            $m = "{$ch->chapter_no} ({$ch->title}) beserta isinya telah dihapus dari silabus kelas.";
+            header('Location: /amto/repository.php?class_id=' . $target_class_id . '&msg=' . urlencode($m));
+            exit;
+        }
+    }
+
+    // 4. TAHAP 2A: Tambah Materi ke Dalam Bab Tertentu
+    if ($action === 'add_material_to_chapter') {
+        $target_class_id = required_param('target_class_id', PARAM_INT);
+        $chapter_id = required_param('chapter_id', PARAM_INT);
+        $chapter_no = trim(optional_param('chapter_no', 'Bab 1', PARAM_TEXT));
+        $batch_code = trim(optional_param('batch_code', 'Semua Batch', PARAM_TEXT));
+        $category_type = trim(optional_param('category_type', 'Basic License', PARAM_TEXT));
+        $title = trim(optional_param('title', '', PARAM_TEXT));
+        $module_code = strtoupper(trim(optional_param('module_code', '', PARAM_TEXT)));
+        $file_type = trim(optional_param('file_type', 'PDF Training Manual', PARAM_TEXT));
+        $description = trim(optional_param('description', '', PARAM_TEXT));
+
+        if ($module_code === '') {
+            $module_code = 'MAT-' . strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $chapter_no));
+        }
+
+        if ($title !== '') {
+            $upload_res = amto_save_repo_file($module_code);
             $rec = new stdClass();
-            $rec->module_code = $module_code;
-            $rec->title = $title;
-            $rec->category_type = $category_type;
-            $rec->batch_code = $batch_code ?: 'Semua Batch';
-            $rec->file_type = $file_type;
-            $rec->file_path = $upload_res['path'];
-            $rec->file_size = $upload_res['size'] ?: 'Dokumen Digital';
-            $rec->file_hash = $upload_res['hash'] ?? '';
-            $rec->doc_version = $doc_version ?: 'Rev. 01 - 2026';
-            $rec->description = $description;
-            $rec->uploaded_by = $USER->id;
-            $rec->uploader_name = fullname($USER);
-            $rec->status = 'Published';
-            $rec->timecreated = time();
+            $rec->module_code    = $module_code;
+            $rec->title          = $title;
+            $rec->category_type  = $category_type;
+            $rec->batch_code     = $batch_code;
+            $rec->chapter_id     = $chapter_id;
+            $rec->chapter_no     = $chapter_no;
+            $rec->file_type      = $file_type;
+            $rec->file_path      = $upload_res['path'];
+            $rec->file_size      = $upload_res['size'] ?: 'Materi Digital';
+            $rec->file_hash      = $upload_res['hash'] ?? '';
+            $rec->doc_version    = 'Rev. 01 - 2026';
+            $rec->description    = $description;
+            $rec->has_assessment = 'Tidak Ada Assessment';
+            $rec->uploaded_by    = $USER->id;
+            $rec->uploader_name  = fullname($USER);
+            $rec->status         = 'Published';
+            $rec->timecreated    = time();
 
             $new_mod_id = $DB->insert_record('amto_repository', $rec);
             if (function_exists('amto_sync_cross_db')) {
                 amto_sync_cross_db(true);
             }
-            if (function_exists('amto_log_audit_event')) {
-                amto_log_audit_event('REPO_MODULE_UPLOAD', 'amto_repository', (int)$new_mod_id, "module={$module_code}, ver={$rec->doc_version}", "Uploaded training manual {$title}, SHA256=" . ($rec->file_hash ?: 'none'));
-            }
-
-            $m = "Modul [{$module_code}] {$title} berhasil ditambahkan ke LMS Repository AMTO.";
-            header('Location: /amto/repository.php?msg=' . urlencode($m));
+            $m = "Materi \"{$title}\" berhasil ditambahkan ke dalam {$chapter_no}.";
+            header('Location: /amto/repository.php?class_id=' . $target_class_id . '&msg=' . urlencode($m));
             exit;
-        } else {
-            $notice_msg = 'Mohon lengkapi Kode Modul dan Judul Materi.';
-            $notice_type = 'danger';
         }
-    } else if ($action === 'delete_module') {
+    }
+
+    // 5. Edit Materi di Dalam Bab
+    if ($action === 'edit_material') {
         $mod_id = required_param('mod_id', PARAM_INT);
+        $target_class_id = required_param('target_class_id', PARAM_INT);
         $mod = $DB->get_record('amto_repository', ['id' => $mod_id]);
         if ($mod) {
-            // [SEC-FIX-04] SEC-05 Soft-Delete / Void instead of Hard Delete
+            $mod->title       = trim(optional_param('title', $mod->title, PARAM_TEXT));
+            $mod->module_code = strtoupper(trim(optional_param('module_code', $mod->module_code, PARAM_TEXT)));
+            $mod->file_type   = trim(optional_param('file_type', $mod->file_type, PARAM_TEXT));
+            $mod->description = trim(optional_param('description', (string)$mod->description, PARAM_TEXT));
+            $upload_res = amto_save_repo_file($mod->module_code ?: 'mat');
+            if ($upload_res['path'] !== '') {
+                $mod->file_path = $upload_res['path'];
+                $mod->file_size = $upload_res['size'];
+                $mod->file_hash = $upload_res['hash'];
+            }
+            $DB->update_record('amto_repository', $mod);
+            $m = "Materi \"{$mod->title}\" berhasil diperbarui.";
+            header('Location: /amto/repository.php?class_id=' . $target_class_id . '&msg=' . urlencode($m));
+            exit;
+        }
+    }
+
+    // 6. Hapus Materi dari Bab
+    if ($action === 'delete_module') {
+        $mod_id = required_param('mod_id', PARAM_INT);
+        $target_class_id = optional_param('target_class_id', 0, PARAM_INT);
+        $mod = $DB->get_record('amto_repository', ['id' => $mod_id]);
+        if ($mod) {
             $mod->status = 'Voided';
             $DB->update_record('amto_repository', $mod);
-            if (function_exists('amto_log_audit_event')) {
-                amto_log_audit_event('REPO_MODULE_VOID', 'amto_repository', $mod_id, 'status=Voided', "Module [{$mod->module_code}] voided by " . fullname($USER));
+            $m = "Materi \"{$mod->title}\" telah dihapus dari {$mod->chapter_no}.";
+            header('Location: /amto/repository.php?class_id=' . $target_class_id . '&msg=' . urlencode($m));
+            exit;
+        }
+    }
+
+    // 7. TAHAP 2B: Buat Ujian / Assessment di Dalam Bab Tertentu
+    if ($action === 'add_exam_to_chapter') {
+        $target_class_id = required_param('target_class_id', PARAM_INT);
+        $chapter_id = required_param('chapter_id', PARAM_INT);
+        $chapter_no = trim(optional_param('chapter_no', 'Bab 1', PARAM_TEXT));
+        $batch_code = trim(optional_param('batch_code', '', PARAM_TEXT));
+        $category_type = trim(optional_param('category_type', 'Basic License', PARAM_TEXT));
+        $title = trim(optional_param('title', '', PARAM_TEXT));
+        $exam_code = strtoupper(trim(optional_param('exam_code', '', PARAM_TEXT)));
+        $exam_type = trim(optional_param('exam_type', 'Written CBT (Multiple Choice)', PARAM_TEXT));
+        $duration_mins = max(15, optional_param('duration_mins', 60, PARAM_INT));
+        $passing_grade = max(50, min(100, optional_param('passing_grade', 75, PARAM_INT)));
+        $exam_date = trim(optional_param('exam_date', date('Y-m-d', strtotime('+7 days')), PARAM_TEXT));
+
+        if ($exam_code === '') {
+            $exam_code = 'CBT-' . strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $chapter_no)) . '-' . rand(10, 99);
+        }
+
+        if ($title !== '') {
+            $e = new stdClass();
+            $e->exam_code     = $exam_code;
+            $e->title         = $title;
+            $e->category_type = $category_type;
+            $e->batch_code    = $batch_code;
+            $e->chapter_id    = $chapter_id;
+            $e->chapter_no    = $chapter_no;
+            $e->exam_type     = $exam_type;
+            $e->passing_grade = $passing_grade;
+            $e->duration_mins = $duration_mins;
+            $e->exam_date     = $exam_date;
+            $e->assessor_name = fullname($USER);
+            $e->status        = 'Active';
+            $e->timecreated   = time();
+
+            $eid = $DB->insert_record('amto_exams', $e);
+            if (function_exists('amto_sync_cross_db')) {
+                amto_sync_cross_db(true);
             }
-            $m = "Modul [{$mod->module_code}] {$mod->title} telah ditandai VOID (Soft-Delete SEC-05).";
-            header('Location: /amto/repository.php?msg=' . urlencode($m));
+            $m = "Ujian / Assessment \"[{$e->exam_code}] {$e->title}\" berhasil ditambahkan ke dalam {$chapter_no}.";
+            header('Location: /amto/repository.php?class_id=' . $target_class_id . '&msg=' . urlencode($m));
+            exit;
+        }
+    }
+
+    // 8. Hapus Ujian dari Bab
+    if ($action === 'delete_exam') {
+        $exam_id = required_param('exam_id', PARAM_INT);
+        $target_class_id = optional_param('target_class_id', 0, PARAM_INT);
+        $ex = $DB->get_record('amto_exams', ['id' => $exam_id]);
+        if ($ex) {
+            $ex->status = 'Voided';
+            $DB->update_record('amto_exams', $ex);
+            $DB->delete_records('amto_exam_results', ['exam_id' => $exam_id]);
+            try {
+                $DB->execute("DELETE FROM tatc_web.exams WHERE code = ?", [$ex->exam_code]);
+            } catch (Throwable $e) {
+            }
+            $m = "Ujian [{$ex->exam_code}] {$ex->title} beserta nilai terkait telah dihapus dari silabus.";
+            header('Location: /amto/repository.php?class_id=' . $target_class_id . '&msg=' . urlencode($m));
             exit;
         }
     }
 }
 
-$all_modules = $DB->get_records('amto_repository', null, 'timecreated DESC');
-$schedules = $DB->get_records('amto_schedules', null, 'start_date ASC');
+$raw_schedules = $DB->get_records('amto_schedules', null, 'id DESC');
+$schedules = [];
+foreach ($raw_schedules as $sc) {
+    if (in_array(strtolower((string)$sc->status), ['void', 'voided'], true)) {
+        continue;
+    }
+    $schedules[$sc->id] = $sc;
+}
 
-$total_modules = count($all_modules);
-$basic_count = 0;
-$type_count = 0;
-$mandatory_count = 0;
-foreach ($all_modules as $m) {
-    if (stripos($m->category_type, 'Basic License') !== false) {
-        $basic_count++;
-    } else if (stripos($m->category_type, 'Type Rating') !== false) {
-        $type_count++;
-    } else {
-        $mandatory_count++;
+$raw_chapters = $DB->get_records('amto_chapters', null, 'id ASC');
+$all_chapters = [];
+foreach ($raw_chapters as $rc) {
+    if (in_array(strtolower((string)$rc->status), ['void', 'voided'], true)) {
+        continue;
+    }
+    $all_chapters[$rc->id] = $rc;
+}
+
+$raw_modules = $DB->get_records('amto_repository', null, 'id ASC');
+$all_modules = [];
+foreach ($raw_modules as $rm) {
+    if (in_array(strtolower((string)$rm->status), ['void', 'voided'], true)) {
+        continue;
+    }
+    $all_modules[] = $rm;
+}
+
+$raw_exams = $DB->get_records('amto_exams', null, 'id ASC');
+$all_exams = [];
+foreach ($raw_exams as $re) {
+    if (in_array(strtolower((string)$re->status), ['void', 'voided'], true)) {
+        continue;
+    }
+    $all_exams[] = $re;
+}
+
+$selected_class = ($class_id > 0 && isset($schedules[$class_id])) ? $schedules[$class_id] : null;
+
+// Auto-enroll active LMS student into the class when they open/enter the class syllabus
+if ($selected_class && $role === 'student' && isloggedin() && !isguestuser()) {
+    $already_in_class = $DB->get_record_select(
+        'amto_registrations',
+        'schedule_id = :sid AND (userid = :uid OR LOWER(username) = LOWER(:uname) OR LOWER(email) = LOWER(:uemail)) AND LOWER(status) NOT IN (\'void\', \'voided\')',
+        ['sid' => $selected_class->id, 'uid' => $USER->id, 'uname' => $USER->username, 'uemail' => $USER->email],
+        '*',
+        IGNORE_MULTIPLE
+    );
+    if (!$already_in_class) {
+        $general_reg = $DB->get_record_select(
+            'amto_registrations',
+            'schedule_id = 0 AND (userid = :uid OR LOWER(username) = LOWER(:uname) OR LOWER(email) = LOWER(:uemail)) AND LOWER(status) NOT IN (\'void\', \'voided\')',
+            ['uid' => $USER->id, 'uname' => $USER->username, 'uemail' => $USER->email],
+            '*',
+            IGNORE_MULTIPLE
+        );
+        if ($general_reg) {
+            $general_reg->schedule_id = (int)$selected_class->id;
+            $general_reg->program_name = $selected_class->batch_code . ' – ' . $selected_class->program_name;
+            $general_reg->timemodified = time();
+            $DB->update_record('amto_registrations', $general_reg);
+        }
     }
 }
 
-// Filter modules
-$visible_modules = [];
-foreach ($all_modules as $m) {
-    if ($cat_filter !== 'all' && stripos($m->category_type, $cat_filter) === false) {
-        continue;
+// Auto-migrate any orphaned materials in this class into a Wadah Bab (mdl_amto_chapters) if not linked yet
+if ($selected_class) {
+    foreach ($all_modules as $m) {
+        if (strcasecmp(trim($m->batch_code), trim($selected_class->batch_code)) === 0 && empty($m->chapter_id)) {
+            $cno = !empty($m->chapter_no) ? trim($m->chapter_no) : 'Bab 1';
+            $found_ch = null;
+            foreach ($all_chapters as $ech) {
+                if ((int)$ech->schedule_id === (int)$selected_class->id && strcasecmp(trim($ech->chapter_no), $cno) === 0) {
+                    $found_ch = $ech;
+                    break;
+                }
+            }
+            if (!$found_ch) {
+                $nc = new stdClass();
+                $nc->schedule_id = (int)$selected_class->id;
+                $nc->batch_code  = $selected_class->batch_code;
+                $nc->chapter_no  = $cno;
+                $nc->title       = $m->title ?: $cno;
+                $nc->description = $m->description ?: '';
+                $nc->status      = 'Active';
+                $nc->timecreated = time();
+                $nc->id = $DB->insert_record('amto_chapters', $nc);
+                $all_chapters[$nc->id] = $nc;
+                $found_ch = $nc;
+            }
+            $m->chapter_id = (int)$found_ch->id;
+            $DB->update_record('amto_repository', $m);
+        }
     }
-    if ($search_q !== '' && stripos($m->module_code, $search_q) === false && stripos($m->title, $search_q) === false && stripos((string)$m->description, $search_q) === false) {
-        continue;
-    }
-    $visible_modules[] = $m;
 }
 
 echo $OUTPUT->header();
 echo amto_render_shared_styles();
 ?>
 
+<style>
+.celoe-course-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+    gap: 20px;
+    margin-top: 8px;
+}
+.celoe-course-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: all 0.22s ease;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+    text-decoration: none !important;
+    color: inherit !important;
+}
+.celoe-course-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 14px 28px rgba(185, 28, 28, 0.12);
+    border-color: #fca5a5;
+}
+.celoe-card-banner {
+    background: linear-gradient(135deg, #991b1b 0%, #dc2626 60%, #b91c1c 100%);
+    color: #ffffff;
+    padding: 18px 20px;
+}
+.celoe-card-code {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+}
+.celoe-card-title {
+    font-size: 18px;
+    font-weight: 800;
+    color: #ffffff;
+    margin: 0 0 4px 0;
+    line-height: 1.3;
+}
+.celoe-card-mode {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.88);
+    font-weight: 500;
+}
+.celoe-card-body {
+    padding: 18px 20px;
+    flex: 1;
+}
+.celoe-meta-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 13px;
+    color: #334155;
+    margin-bottom: 16px;
+}
+.celoe-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.celoe-syllabus-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 12px;
+    border-top: 1px solid #f1f5f9;
+}
+.celoe-card-footer {
+    padding: 13px 20px;
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.celoe-chapter-card {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 16px;
+    margin-bottom: 18px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.03);
+}
+.celoe-chapter-header {
+    background: #f8fafc;
+    padding: 15px 20px;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+.celoe-chapter-badge {
+    background: #b91c1c;
+    color: #ffffff;
+    font-weight: 800;
+    font-size: 12px;
+    padding: 5px 12px;
+    border-radius: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.celoe-chapter-body {
+    padding: 18px 20px;
+}
+.celoe-item-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #ffffff;
+    margin-bottom: 10px;
+}
+.celoe-item-row:last-child {
+    margin-bottom: 0;
+}
+.celoe-inline-drawer {
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+}
+</style>
+
 <div class="tatc-wrap">
-    <!-- HERO BANNER -->
+
+<?php if ($selected_class): ?>
+    <?php
+    // Filter Wadah Bab for this class
+    $class_chapters = [];
+    foreach ($all_chapters as $ch) {
+        if ((int)$ch->schedule_id === (int)$selected_class->id ||
+            strcasecmp(trim($ch->batch_code), trim($selected_class->batch_code)) === 0) {
+            $class_chapters[] = $ch;
+        }
+    }
+    usort($class_chapters, function($a, $b) {
+        return strnatcasecmp($a->chapter_no, $b->chapter_no);
+    });
+
+    // Next suggested Bab number
+    $next_bab_num = count($class_chapters) + 1;
+    $next_bab_label = 'Bab ' . $next_bab_num;
+
+    // Collect materials and exams for this class
+    $class_modules = [];
+    foreach ($all_modules as $m) {
+        if (strcasecmp(trim($m->batch_code), trim($selected_class->batch_code)) === 0 ||
+            strcasecmp(trim($m->batch_code), 'Semua Batch') === 0) {
+            $class_modules[] = $m;
+        }
+    }
+
+    $class_exams = [];
+    foreach ($all_exams as $ex) {
+        if (strcasecmp(trim($ex->batch_code), trim($selected_class->batch_code)) === 0 ||
+            stripos($selected_class->category_type, $ex->category_type) !== false ||
+            stripos($ex->category_type, $selected_class->category_type) !== false) {
+            $class_exams[] = $ex;
+        }
+    }
+    ?>
+
+    <!-- LEVEL 2: HALAMAN SILABUS KELAS BERJENJANG (ALA CeLOE LMS TELKOM UNIVERSITY) -->
+    <div class="mb-3">
+        <a href="/amto/repository.php" class="tatc-btn-outline" style="padding: 8px 16px; font-size: 13px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            <span>Kembali ke Daftar Kelas Saya</span>
+        </a>
+    </div>
+
     <div class="tatc-hero">
         <div>
             <div class="tatc-hero-badge">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-                <span>CASR Part 147 &bull; Central Training Manual &amp; Module Repository</span>
+                <span>SILABUS KELAS &bull; <?php echo s($selected_class->category_type); ?> &bull; KODE BATCH: <?php echo s($selected_class->batch_code); ?></span>
             </div>
-            <h1>
-                <?php
-                if ($role === 'admin') {
-                    echo 'Manajemen LMS Repository & Modul Materi AMTO';
-                } else if ($role === 'instructor') {
-                    echo 'Repository Bahan Ajar & Modul Instruktur AMTO';
-                } else {
-                    echo 'Katalog Materi & Modul Pelatihan Saya (LMS Repository)';
-                }
-                ?>
-            </h1>
+            <h1><?php echo s($selected_class->program_name); ?></h1>
             <p>
-                <?php if ($can_manage): ?>
-                    Pusat penyimpanan terpadu Training Manual (MTPM), modul kurikulum CASR Part 147, slide presentasi pengajar, dan panduan praktik hangar dengan kontrol versi dokumen QA.
-                <?php else: ?>
-                    Akses dan unduh modul pelatihan resmi, buku Training Manual CASR Part 147, serta materi kelas sesuai program pelatihan yang Anda ikuti di TATC – AMTO.
-                <?php endif; ?>
+                Instruktur Pengampu: <strong><?php echo s($selected_class->instructor_name); ?></strong> &nbsp;|&nbsp;
+                Ruangan / Hangar: <strong><?php echo s($selected_class->room_location); ?></strong> &nbsp;|&nbsp;
+                Periode: <strong><?php echo s($selected_class->start_date); ?> s/d <?php echo s($selected_class->end_date); ?></strong> (<?php echo s($selected_class->schedule_time); ?>)
             </p>
         </div>
         <div class="d-flex flex-wrap gap-2">
-            <a href="/course/index.php" class="tatc-btn-outline" style="background: rgba(255,255,255,0.14); color:#fff !important; border-color: rgba(255,255,255,0.3);">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-                <span>Struktur Kategori Kelas</span>
-            </a>
             <?php if ($can_manage): ?>
-            <button type="button" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:700;" onclick="var f=document.getElementById('tatcUploadRepoPanel'); f.style.display = (f.style.display==='none' ? 'block' : 'none');">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                <span>Unggah Modul / Materi Baru</span>
+            <button type="button" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:800;" onclick="var f=document.getElementById('tatcCreateBabPanel'); f.style.display = (f.style.display==='none' ? 'block' : 'none');">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>+ Tambah Bab Baru</span>
             </button>
             <?php endif; ?>
         </div>
@@ -226,229 +617,577 @@ echo amto_render_shared_styles();
         </div>
     <?php endif; ?>
 
-    <!-- KPI SUMMARY CARDS -->
-    <div class="tatc-stats-grid">
-        <div class="tatc-stat-card">
-            <div>
-                <div class="tatc-stat-label">Total Modul Tersimpan</div>
-                <div class="tatc-stat-value"><?php echo $total_modules; ?> Modul</div>
-            </div>
-            <div class="tatc-stat-icon">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-            </div>
-        </div>
-        <div class="tatc-stat-card">
-            <div>
-                <div class="tatc-stat-label">Modul Basic License (A / B1 / B2)</div>
-                <div class="tatc-stat-value" style="color:#15803d;"><?php echo $basic_count; ?> Modul</div>
-            </div>
-            <div class="tatc-stat-icon" style="background:#dcfce7; color:#15803d;">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            </div>
-        </div>
-        <div class="tatc-stat-card">
-            <div>
-                <div class="tatc-stat-label">Modul Aircraft Type Rating</div>
-                <div class="tatc-stat-value" style="color:#1d4ed8;"><?php echo $type_count; ?> Modul</div>
-            </div>
-            <div class="tatc-stat-icon" style="background:#dbeafe; color:#1d4ed8;">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-            </div>
-        </div>
-        <div class="tatc-stat-card">
-            <div>
-                <div class="tatc-stat-label">Mandatory &amp; Recurrent (HF/SMS)</div>
-                <div class="tatc-stat-value" style="color:#b91c1c;"><?php echo $mandatory_count; ?> Modul</div>
-            </div>
-            <div class="tatc-stat-icon" style="background:#fee2e2; color:#b91c1c;">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            </div>
-        </div>
-    </div>
-
     <?php if ($can_manage): ?>
-    <!-- FORM UNGGAH MODUL REPOSITORY BARU (ADMIN & INSTRUCTOR ONLY) -->
-    <div id="tatcUploadRepoPanel" class="tatc-panel" style="display:none;">
+    <!-- TAHAP 1: FORM SIMPEL UNTUK MEMBUAT WADAH BAB BARU (MISAL: BAB 1, BAB 2, DST.) -->
+    <div id="tatcCreateBabPanel" class="tatc-panel" style="display: <?php echo empty($class_chapters) ? 'block' : 'none'; ?>; border: 2px solid #fecaca;">
         <div class="tatc-panel-header">
             <div>
-                <h2 class="tatc-panel-title">Unggah Modul &amp; Materi Pelatihan ke LMS Repository</h2>
-                <p class="tatc-panel-sub">Dokumen yang diunggah akan tercatat di tabel <code>mdl_amto_repository</code> lengkap dengan nomor versi revisi QA dan pengunggah.</p>
+                <h2 class="tatc-panel-title">Buat Bab / Pertemuan Silabus Baru</h2>
+                <p class="tatc-panel-sub">Tambahkan wadah Bab terlebih dahulu (misalnya <strong>Bab 1</strong>, <strong>Bab 2</strong>). Setelah Bab masuk ke daftar di bawah, Anda dapat menambahkan <strong>Materi</strong> atau <strong>Ujian</strong> di dalam Bab tersebut.</p>
             </div>
-            <span class="tatc-badge tatc-badge-open">Kontrol Dokumen CASR 147</span>
+            <span class="tatc-badge tatc-badge-open">Kelas: <?php echo s($selected_class->program_name); ?></span>
         </div>
 
-        <form method="post" action="/amto/repository.php" enctype="multipart/form-data">
+        <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>">
             <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
-            <input type="hidden" name="action" value="upload_module">
+            <input type="hidden" name="action" value="create_chapter">
+            <input type="hidden" name="target_class_id" value="<?php echo (int)$selected_class->id; ?>">
+            <input type="hidden" name="batch_code" value="<?php echo s($selected_class->batch_code); ?>">
 
             <div class="tatc-form-grid mb-3">
                 <div>
-                    <label class="tatc-label">Kode Modul CASR Part 147 *</label>
-                    <input type="text" name="module_code" class="tatc-input" placeholder="Contoh: MOD-01 / MOD-09 / MOD-11A" required>
-                </div>
-                <div>
-                    <label class="tatc-label">Judul Modul / Training Manual *</label>
-                    <input type="text" name="title" class="tatc-input" placeholder="Contoh: Human Factors in Aviation Maintenance" required>
-                </div>
-                <div>
-                    <label class="tatc-label">Kategori Kurikulum AMTO *</label>
-                    <select name="category_type" class="tatc-select">
-                        <option value="Basic License Cat A (A1–A4)">Basic License Category A (Line Maintenance A1–A4)</option>
-                        <option value="Basic License Cat B1 (Turbine/Piston)">Basic License Category B1 (Turbine &amp; Piston)</option>
-                        <option value="Basic License Cat B2 (Avionics)">Basic License Category B2 (Avionics Maintenance)</option>
-                        <option value="Aircraft Type Rating">Aircraft Type Rating &amp; Specialized</option>
-                        <option value="Mandatory & Recurrent">Mandatory &amp; Recurrent (Human Factors, SMS, EWIS)</option>
+                    <label class="tatc-label">Urutan Bab *</label>
+                    <select name="chapter_no" class="tatc-select">
+                        <?php for ($bi = 1; $bi <= 12; $bi++): ?>
+                            <?php $bl = 'Bab ' . $bi; ?>
+                            <option value="<?php echo $bl; ?>" <?php echo ($bl === $next_bab_label) ? 'selected' : ''; ?>><?php echo $bl; ?></option>
+                        <?php endfor; ?>
                     </select>
                 </div>
                 <div>
-                    <label class="tatc-label">Target Batch Pelatihan *</label>
-                    <select name="batch_code" class="tatc-select">
-                        <option value="Semua Batch">Semua Batch (Terbuka untuk Kategori Ini)</option>
-                        <?php foreach ($schedules as $s): ?>
-                            <option value="<?php echo s($s->batch_code); ?>"><?php echo s($s->batch_code . ' – ' . $s->program_name); ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                    <label class="tatc-label">Judul Topik Bab *</label>
+                    <input type="text" name="title" class="tatc-input" placeholder="Contoh: Pengenalan Pesawat & Regulasi CASR 147" required>
                 </div>
                 <div>
-                    <label class="tatc-label">Jenis Dokumen Materi *</label>
-                    <select name="file_type" class="tatc-select">
-                        <option value="PDF Training Manual">PDF Training Manual (MTPM)</option>
-                        <option value="Slide Presentasi Kelas">Slide Presentasi Kelas (PPT/PDF)</option>
-                        <option value="Panduan Praktik Hangar (Job Card)">Panduan Praktik Hangar (Task / Job Card)</option>
-                        <option value="Silabus & Kurikulum">Silabus &amp; Kurikulum CASR Part 147</option>
-                        <option value="Video Pembelajaran">Video Pembelajaran</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="tatc-label">Nomor Revisi Dokumen (Standar QA) *</label>
-                    <input type="text" name="doc_version" class="tatc-input" value="Rev. 01 - 2026" required>
-                </div>
-            </div>
-
-            <div class="tatc-form-grid mb-4">
-                <div>
-                    <label class="tatc-label">Deskripsi Ringkas / Pokok Bahasan Modul</label>
-                    <input type="text" name="description" class="tatc-input" placeholder="Contoh: Modul wajib CASR Part 147 Sub-module 9.1 s/d 9.9">
-                </div>
-                <div>
-                    <label class="tatc-label">Pilih File Materi (PDF/PPTX/DOCX/MP4, Maks 25MB)</label>
-                    <input type="file" name="repo_file" class="tatc-input" accept=".pdf,.ppt,.pptx,.doc,.docx,.mp4,.zip,.png,.jpg">
+                    <label class="tatc-label">Deskripsi Singkat Bab (Opsional)</label>
+                    <input type="text" name="description" class="tatc-input" placeholder="Contoh: Pokok bahasan dasar dan pengantar materi">
                 </div>
             </div>
 
             <div class="d-flex justify-content-end gap-2">
-                <button type="button" class="tatc-btn-outline" onclick="document.getElementById('tatcUploadRepoPanel').style.display='none';">Batal</button>
-                <button type="submit" class="tatc-btn-red">Simpan &amp; Terbitkan Modul</button>
+                <button type="button" class="tatc-btn-outline" onclick="document.getElementById('tatcCreateBabPanel').style.display='none';">Batal</button>
+                <button type="submit" class="tatc-btn-red">+ Simpan &amp; Buat Bab</button>
             </div>
         </form>
     </div>
     <?php endif; ?>
 
-    <!-- TABEL KATALOG REPOSITORY LMS -->
+    <!-- TAHAP 2: DAFTAR WADAH BAB SILABUS (BAB 1, BAB 2, DST.) BESERTA TOMBOL TAMBAH MATERI & TAMBAH UJIAN DI DALAMNYA -->
     <div class="tatc-panel">
         <div class="tatc-panel-header">
             <div>
-                <h2 class="tatc-panel-title">Daftar Modul &amp; Bahan Ajar Repository AMTO</h2>
-                <p class="tatc-panel-sub">Cari berdasarkan kode modul atau filter per kategori lisensi CASR Part 147.</p>
+                <h2 class="tatc-panel-title">Struktur Silabus Pembelajaran, Materi &amp; Assessment</h2>
+                <p class="tatc-panel-sub">
+                    <?php if ($can_manage): ?>
+                        Gunakan tombol <strong>"+ Tambah Materi"</strong> atau <strong>"+ Buat Ujian"</strong> pada masing-masing kotak Bab di bawah ini untuk mengisi konten pembelajaran.
+                    <?php else: ?>
+                        Daftar urutan Bab pembelajaran beserta modul materi dan ujian/assessment pada kelas <strong><?php echo s($selected_class->program_name); ?></strong>.
+                    <?php endif; ?>
+                </p>
             </div>
-            <div class="d-flex flex-wrap gap-2 align-items-center">
-                <form method="get" action="/amto/repository.php" class="d-flex gap-2">
-                    <input type="hidden" name="cat" value="<?php echo s($cat_filter); ?>">
-                    <input type="text" name="q" class="tatc-input" style="min-width:210px; padding:7px 12px;" placeholder="Cari Kode / Judul Modul..." value="<?php echo s($search_q); ?>">
-                    <button type="submit" class="tatc-btn-outline" style="padding:7px 14px;">Cari</button>
-                </form>
-            </div>
+            <span class="tatc-badge tatc-badge-ongoing"><?php echo count($class_chapters); ?> Bab Silabus</span>
         </div>
 
-        <div class="d-flex flex-wrap gap-2 mb-3">
-            <a href="/amto/repository.php?cat=all" class="<?php echo ($cat_filter === 'all') ? 'tatc-btn-red' : 'tatc-btn-outline'; ?>" style="padding:6px 13px; font-size:12px;">Semua Kategori</a>
-            <a href="/amto/repository.php?cat=Cat A" class="<?php echo ($cat_filter === 'Cat A') ? 'tatc-btn-red' : 'tatc-btn-outline'; ?>" style="padding:6px 13px; font-size:12px;">Basic Cat A</a>
-            <a href="/amto/repository.php?cat=Cat B1" class="<?php echo ($cat_filter === 'Cat B1') ? 'tatc-btn-red' : 'tatc-btn-outline'; ?>" style="padding:6px 13px; font-size:12px;">Basic Cat B1</a>
-            <a href="/amto/repository.php?cat=Cat B2" class="<?php echo ($cat_filter === 'Cat B2') ? 'tatc-btn-red' : 'tatc-btn-outline'; ?>" style="padding:6px 13px; font-size:12px;">Basic Cat B2</a>
-            <a href="/amto/repository.php?cat=Type Rating" class="<?php echo ($cat_filter === 'Type Rating') ? 'tatc-btn-red' : 'tatc-btn-outline'; ?>" style="padding:6px 13px; font-size:12px;">Type Rating</a>
-            <a href="/amto/repository.php?cat=Mandatory" class="<?php echo ($cat_filter === 'Mandatory') ? 'tatc-btn-red' : 'tatc-btn-outline'; ?>" style="padding:6px 13px; font-size:12px;">Mandatory</a>
-        </div>
-
-        <?php if (empty($visible_modules)): ?>
+        <?php if (empty($class_chapters)): ?>
             <div class="text-center py-5">
-                <p class="text-muted mb-1" style="font-size:15px;">Belum ada modul materi yang tersimpan di Repository LMS pada kategori ini.</p>
-                <?php if ($can_manage): ?>
-                    <p class="text-muted" style="font-size:13px;">Klik tombol <strong>"Unggah Modul / Materi Baru"</strong> di kanan atas untuk mulai mengunggah Training Manual atau bahan ajar.</p>
-                <?php endif; ?>
+                <div style="font-weight: 800; color: #0f172a; font-size: 16px; margin-bottom: 6px;">
+                    Belum Ada Bab Silabus pada Kelas "<?php echo s($selected_class->program_name); ?>"
+                </div>
+                <p class="text-muted mb-0" style="font-size: 13.5px; max-width: 560px; margin: 0 auto;">
+                    <?php if ($can_manage): ?>
+                        Silakan buat <strong>Bab 1</strong> terlebih dahulu melalui form <strong>"Buat Bab / Pertemuan Silabus Baru"</strong> di atas.
+                    <?php else: ?>
+                        Instruktur atau Admin belum menambahkan Bab silabus pada kelas ini.
+                    <?php endif; ?>
+                </p>
             </div>
         <?php else: ?>
-            <div class="tatc-table-wrap">
-                <table class="tatc-table">
-                    <thead>
-                        <tr>
-                            <th>Kode Modul &amp; Revisi QA</th>
-                            <th>Judul Materi &amp; Deskripsi</th>
-                            <th>Kategori &amp; Target Batch</th>
-                            <th>Jenis &amp; Ukuran File</th>
-                            <th>Diunggah Oleh</th>
-                            <th>Aksi</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($visible_modules as $m): ?>
-                            <tr>
-                                <td>
-                                    <strong style="color:#b91c1c; font-size:13.5px;"><?php echo s($m->module_code); ?></strong>
-                                    <div style="margin-top:4px;">
-                                        <span class="tatc-badge tatc-badge-ongoing"><?php echo s($m->doc_version); ?></span>
-                                    </div>
-                                </td>
-                                <td>
-                                    <div style="font-weight:700; color:#0f172a; font-size:14px;"><?php echo s($m->title); ?></div>
-                                    <?php if (!empty($m->description)): ?>
-                                        <div style="font-size:12px; color:#64748b; margin-top:2px; max-width:320px;"><?php echo s($m->description); ?></div>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
-                                    <div style="font-weight:600; color:#1e293b;"><?php echo s($m->category_type); ?></div>
-                                    <div style="font-size:11.5px; color:#64748b; margin-top:2px;">Target: <?php echo s($m->batch_code); ?></div>
-                                </td>
-                                <td>
-                                    <span class="tatc-doc-pill"><?php echo s($m->file_type); ?></span>
-                                    <div style="font-size:11.5px; color:#64748b; margin-top:2px;"><?php echo s($m->file_size); ?></div>
-                                    <?php if (!empty($m->file_hash)): ?>
-                                        <div style="font-size:10.5px; color:#15803d; font-family:monospace; margin-top:2px;" title="SHA-256: <?php echo s($m->file_hash); ?>">
-                                            ✓ SHA256: <?php echo s(substr($m->file_hash, 0, 10)); ?>...
+            <?php foreach ($class_chapters as $ch): ?>
+                <?php
+                $cid = (int)$ch->id;
+                // Find materials inside this Bab
+                $ch_materials = [];
+                foreach ($class_modules as $m) {
+                    if ((int)$m->chapter_id === $cid ||
+                        (empty($m->chapter_id) && strcasecmp(trim($m->chapter_no), trim($ch->chapter_no)) === 0)) {
+                        $ch_materials[] = $m;
+                    }
+                }
+                // Find exams inside this Bab
+                $ch_exams = [];
+                foreach ($class_exams as $ex) {
+                    if ((int)($ex->chapter_id ?? 0) === $cid ||
+                        (empty($ex->chapter_id) && strcasecmp(trim($ex->chapter_no ?? 'Bab 1'), trim($ch->chapter_no)) === 0)) {
+                        $ch_exams[] = $ex;
+                    }
+                }
+                ?>
+
+                <div class="celoe-chapter-card">
+                    <!-- HEADER BAB -->
+                    <div class="celoe-chapter-header">
+                        <div>
+                            <div class="d-flex align-items-center gap-2 flex-wrap">
+                                <span class="celoe-chapter-badge"><?php echo s($ch->chapter_no); ?></span>
+                                <strong style="font-size: 16px; color: #0f172a;"><?php echo s($ch->title); ?></strong>
+                                <span class="tatc-doc-pill" style="margin:0;">
+                                    <?php echo count($ch_materials); ?> Materi &bull; <?php echo count($ch_exams); ?> Ujian
+                                </span>
+                            </div>
+                            <?php if (!empty($ch->description)): ?>
+                                <div style="font-size: 13px; color: #64748b; margin-top: 4px;">
+                                    <?php echo s($ch->description); ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <?php if ($can_manage): ?>
+                            <div class="d-flex flex-wrap gap-1 align-items-center">
+                                <button type="button" class="tatc-btn-red" style="padding: 6px 12px; font-size: 12px;" onclick="var d=document.getElementById('addMatDrawer_<?php echo $cid; ?>'); d.style.display=(d.style.display==='none'?'block':'none'); document.getElementById('addExDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('editChDrawer_<?php echo $cid; ?>').style.display='none';">
+                                    + Tambah Materi
+                                </button>
+                                <button type="button" class="tatc-btn-outline" style="padding: 6px 12px; font-size: 12px; border-color:#f59e0b; color:#b45309 !important; background:#fffbeb; font-weight:700;" onclick="var d=document.getElementById('addExDrawer_<?php echo $cid; ?>'); d.style.display=(d.style.display==='none'?'block':'none'); document.getElementById('addMatDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('editChDrawer_<?php echo $cid; ?>').style.display='none';">
+                                    + Buat Ujian
+                                </button>
+                                <button type="button" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px; color:#1d4ed8 !important; border-color:#bfdbfe; background:#eff6ff;" onclick="var d=document.getElementById('editChDrawer_<?php echo $cid; ?>'); d.style.display=(d.style.display==='none'?'block':'none'); document.getElementById('addMatDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('addExDrawer_<?php echo $cid; ?>').style.display='none';">
+                                    Edit Bab
+                                </button>
+                                <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>" style="display:inline;" onsubmit="return confirm('Hapus <?php echo s($ch->chapter_no); ?> beserta seluruh materi & ujian di dalamnya?');">
+                                    <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                    <input type="hidden" name="action" value="delete_chapter">
+                                    <input type="hidden" name="chapter_id" value="<?php echo $cid; ?>">
+                                    <input type="hidden" name="target_class_id" value="<?php echo (int)$selected_class->id; ?>">
+                                    <button type="submit" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px; color:#b91c1c !important; border-color:#fecaca; background:#fef2f2;">
+                                        Hapus Bab
+                                    </button>
+                                </form>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <div class="celoe-chapter-body">
+                        <?php if ($can_manage): ?>
+                            <!-- DRAWER 1: FORM TAMBAH MATERI KE BAB INI -->
+                            <div id="addMatDrawer_<?php echo $cid; ?>" class="celoe-inline-drawer" style="display:none;">
+                                <div style="font-weight:800; color:#0f172a; font-size:14px; margin-bottom:10px;">
+                                    Tambah Materi Pembelajaran ke Dalam <?php echo s($ch->chapter_no); ?> (<?php echo s($ch->title); ?>)
+                                </div>
+                                <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>" enctype="multipart/form-data">
+                                    <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                    <input type="hidden" name="action" value="add_material_to_chapter">
+                                    <input type="hidden" name="target_class_id" value="<?php echo (int)$selected_class->id; ?>">
+                                    <input type="hidden" name="chapter_id" value="<?php echo $cid; ?>">
+                                    <input type="hidden" name="chapter_no" value="<?php echo s($ch->chapter_no); ?>">
+                                    <input type="hidden" name="batch_code" value="<?php echo s($selected_class->batch_code); ?>">
+                                    <input type="hidden" name="category_type" value="<?php echo s($selected_class->category_type); ?>">
+
+                                    <div class="tatc-form-grid mb-3">
+                                        <div>
+                                            <label class="tatc-label">Judul Materi *</label>
+                                            <input type="text" name="title" class="tatc-input" placeholder="Contoh: Slide Materi 1 - Pengenalan Sistem" required>
                                         </div>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
-                                    <div style="font-weight:600; font-size:12.5px;"><?php echo s($m->uploader_name); ?></div>
-                                    <div style="font-size:11.5px; color:#64748b;"><?php echo date('d M Y, H:i', (int)$m->timecreated); ?></div>
-                                </td>
-                                <td>
-                                    <div class="d-flex flex-wrap gap-1">
-                                        <?php if (!empty($m->file_path)): ?>
-                                            <a href="/amto/download.php?type=repo&amp;id=<?php echo (int)$m->id; ?>" target="_blank" class="tatc-btn-red" style="padding:6px 12px; font-size:12px;">
-                                                Buka / Unduh
-                                            </a>
-                                        <?php else: ?>
-                                            <span class="tatc-doc-pill">Terdaftar</span>
+                                        <div>
+                                            <label class="tatc-label">Jenis Bahan Ajar</label>
+                                            <select name="file_type" class="tatc-select">
+                                                <option value="PDF Training Manual">PDF Training Manual (MTPM)</option>
+                                                <option value="Slide Presentasi Kelas">Slide Presentasi Kelas (PPT/PDF)</option>
+                                                <option value="Panduan Praktik Hangar (Job Card)">Panduan Praktik Hangar (Job Card)</option>
+                                                <option value="Video Pembelajaran">Video Pembelajaran</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="tatc-label">Pilih File Materi (PDF/PPT/DOC/Gambar)</label>
+                                            <input type="file" name="repo_file" class="tatc-input" accept=".pdf,.ppt,.pptx,.doc,.docx,.mp4,.zip,.png,.jpg,.jpeg">
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="tatc-label">Keterangan / Catatan Materi (Opsional)</label>
+                                        <input type="text" name="description" class="tatc-input" placeholder="Contoh: Silakan pelajari dokumen ini sebelum sesi kelas dimulai.">
+                                    </div>
+                                    <div class="d-flex justify-content-end gap-2">
+                                        <button type="button" class="tatc-btn-outline" style="padding:6px 12px; font-size:12px;" onclick="document.getElementById('addMatDrawer_<?php echo $cid; ?>').style.display='none';">Batal</button>
+                                        <button type="submit" class="tatc-btn-red" style="padding:6px 14px; font-size:12.5px;">Simpan Materi ke <?php echo s($ch->chapter_no); ?></button>
+                                    </div>
+                                </form>
+                            </div>
+
+                            <!-- DRAWER 2: FORM BUAT UJIAN / ASSESSMENT DI BAB INI -->
+                            <div id="addExDrawer_<?php echo $cid; ?>" class="celoe-inline-drawer" style="display:none; background:#fffdf5; border-color:#fde68a;">
+                                <div style="font-weight:800; color:#78350f; font-size:14px; margin-bottom:10px;">
+                                    Buat Ujian / Assessment Baru di Dalam <?php echo s($ch->chapter_no); ?> (<?php echo s($ch->title); ?>)
+                                </div>
+                                <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>">
+                                    <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                    <input type="hidden" name="action" value="add_exam_to_chapter">
+                                    <input type="hidden" name="target_class_id" value="<?php echo (int)$selected_class->id; ?>">
+                                    <input type="hidden" name="chapter_id" value="<?php echo $cid; ?>">
+                                    <input type="hidden" name="chapter_no" value="<?php echo s($ch->chapter_no); ?>">
+                                    <input type="hidden" name="batch_code" value="<?php echo s($selected_class->batch_code); ?>">
+                                    <input type="hidden" name="category_type" value="<?php echo s($selected_class->category_type); ?>">
+
+                                    <div class="tatc-form-grid mb-3">
+                                        <div>
+                                            <label class="tatc-label">Judul Ujian / Quiz *</label>
+                                            <input type="text" name="title" class="tatc-input" placeholder="Contoh: Quiz Evaluasi <?php echo s($ch->chapter_no); ?>" required>
+                                        </div>
+                                        <div>
+                                            <label class="tatc-label">Kode Ujian (Opsional)</label>
+                                            <input type="text" name="exam_code" class="tatc-input" placeholder="Otomatis jika dikosongkan">
+                                        </div>
+                                        <div>
+                                            <label class="tatc-label">Metode Evaluasi</label>
+                                            <select name="exam_type" class="tatc-select">
+                                                <option value="Written CBT (Multiple Choice)">Written CBT (Multiple Choice)</option>
+                                                <option value="Written Essay Exam">Written Essay Exam</option>
+                                                <option value="Practical Assessment (Hangar)">Practical Assessment (Hangar)</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="tatc-label">Tanggal Pelaksanaan</label>
+                                            <input type="date" name="exam_date" class="tatc-input" value="<?php echo date('Y-m-d', strtotime('+7 days')); ?>">
+                                        </div>
+                                        <div>
+                                            <label class="tatc-label">Durasi (Menit)</label>
+                                            <input type="number" name="duration_mins" class="tatc-input" value="60" min="15">
+                                        </div>
+                                        <div>
+                                            <label class="tatc-label">Passing Grade (Standar CASR 147: 75)</label>
+                                            <input type="number" name="passing_grade" class="tatc-input" value="75" min="50" max="100">
+                                        </div>
+                                    </div>
+                                    <div class="d-flex justify-content-end gap-2">
+                                        <button type="button" class="tatc-btn-outline" style="padding:6px 12px; font-size:12px;" onclick="document.getElementById('addExDrawer_<?php echo $cid; ?>').style.display='none';">Batal</button>
+                                        <button type="submit" class="tatc-btn-red" style="padding:6px 14px; font-size:12.5px;">Simpan Ujian ke <?php echo s($ch->chapter_no); ?></button>
+                                    </div>
+                                </form>
+                            </div>
+
+                            <!-- DRAWER 3: FORM EDIT BAB -->
+                            <div id="editChDrawer_<?php echo $cid; ?>" class="celoe-inline-drawer" style="display:none; background:#eff6ff; border-color:#bfdbfe;">
+                                <div style="font-weight:800; color:#1e3a8a; font-size:14px; margin-bottom:10px;">
+                                    Edit Informasi <?php echo s($ch->chapter_no); ?>
+                                </div>
+                                <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>">
+                                    <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                    <input type="hidden" name="action" value="edit_chapter">
+                                    <input type="hidden" name="target_class_id" value="<?php echo (int)$selected_class->id; ?>">
+                                    <input type="hidden" name="chapter_id" value="<?php echo $cid; ?>">
+
+                                    <div class="tatc-form-grid mb-3">
+                                        <div>
+                                            <label class="tatc-label">Urutan Bab *</label>
+                                            <select name="chapter_no" class="tatc-select">
+                                                <?php for ($bi = 1; $bi <= 12; $bi++): ?>
+                                                    <?php $bl = 'Bab ' . $bi; ?>
+                                                    <option value="<?php echo $bl; ?>" <?php echo (strcasecmp($ch->chapter_no, $bl) === 0) ? 'selected' : ''; ?>><?php echo $bl; ?></option>
+                                                <?php endfor; ?>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="tatc-label">Judul Topik Bab *</label>
+                                            <input type="text" name="title" class="tatc-input" value="<?php echo s($ch->title); ?>" required>
+                                        </div>
+                                        <div>
+                                            <label class="tatc-label">Deskripsi Singkat Bab</label>
+                                            <input type="text" name="description" class="tatc-input" value="<?php echo s((string)$ch->description); ?>">
+                                        </div>
+                                    </div>
+                                    <div class="d-flex justify-content-end gap-2">
+                                        <button type="button" class="tatc-btn-outline" style="padding:6px 12px; font-size:12px;" onclick="document.getElementById('editChDrawer_<?php echo $cid; ?>').style.display='none';">Batal</button>
+                                        <button type="submit" class="tatc-btn-red" style="padding:6px 14px; font-size:12.5px;">Simpan Perubahan Bab</button>
+                                    </div>
+                                </form>
+                            </div>
+                        <?php endif; ?>
+
+                        <!-- ISI BAB: DAFTAR MATERI & UJIAN DI DALAM BAB INI -->
+                        <?php if (empty($ch_materials) && empty($ch_exams)): ?>
+                            <div style="text-align:center; padding: 18px 14px; border: 1px dashed #cbd5e1; border-radius: 10px; color: #64748b; font-size: 13px;">
+                                Belum ada materi atau ujian di dalam <strong><?php echo s($ch->chapter_no); ?></strong>.
+                                <?php if ($can_manage): ?>
+                                    Klik tombol <strong>"+ Tambah Materi"</strong> atau <strong>"+ Buat Ujian"</strong> di pojok kanan atas <?php echo s($ch->chapter_no); ?> untuk menambahkan konten.
+                                <?php endif; ?>
+                            </div>
+                        <?php else: ?>
+                            <!-- ITEM MATERI -->
+                            <?php foreach ($ch_materials as $item): ?>
+                                <div class="celoe-item-row">
+                                    <div style="max-width: 680px;">
+                                        <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                                            <span class="tatc-doc-pill" style="margin:0; background:#dcfce7; color:#15803d; font-weight:800;">MATERI</span>
+                                            <strong style="font-size: 14px; color: #0f172a;"><?php echo s($item->title); ?></strong>
+                                            <span class="tatc-doc-pill" style="margin:0;"><?php echo s($item->file_type); ?></span>
+                                        </div>
+                                        <?php if (!empty($item->description)): ?>
+                                            <div style="font-size: 12.5px; color: #475569; margin-top: 3px;">
+                                                <?php echo s($item->description); ?>
+                                            </div>
                                         <?php endif; ?>
+                                        <div style="font-size: 11.5px; color: #94a3b8; margin-top: 4px;">
+                                            Diunggah oleh: <strong><?php echo s($item->uploader_name); ?></strong> &bull; <?php echo s($item->file_size); ?>
+                                        </div>
+                                    </div>
+
+                                    <div class="d-flex flex-wrap gap-1 align-items-center">
+                                        <?php if (!empty($item->file_path)): ?>
+                                            <a href="/amto/download.php?type=repo&amp;id=<?php echo (int)$item->id; ?>" target="_blank" class="tatc-btn-red" style="padding: 6px 12px; font-size: 12px;">
+                                                <?php echo $can_manage ? 'Lihat File' : 'Buka / Unduh Materi'; ?>
+                                            </a>
+                                        <?php endif; ?>
+
                                         <?php if ($can_manage): ?>
-                                            <form method="post" action="/amto/repository.php" style="display:inline;" onsubmit="return confirm('Hapus modul ini dari Repository?');">
+                                            <button type="button" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px; color:#1d4ed8 !important; border-color:#bfdbfe; background:#eff6ff;" onclick="var em=document.getElementById('editMat_<?php echo (int)$item->id; ?>'); em.style.display=(em.style.display==='none'?'block':'none');">
+                                                Edit
+                                            </button>
+                                            <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>" style="display:inline;" onsubmit="return confirm('Hapus materi ini dari <?php echo s($ch->chapter_no); ?>?');">
                                                 <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                                                 <input type="hidden" name="action" value="delete_module">
-                                                <input type="hidden" name="mod_id" value="<?php echo $m->id; ?>">
-                                                <button type="submit" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px; color:#b91c1c !important; border-color:#fecaca;">
+                                                <input type="hidden" name="mod_id" value="<?php echo (int)$item->id; ?>">
+                                                <input type="hidden" name="target_class_id" value="<?php echo (int)$selected_class->id; ?>">
+                                                <button type="submit" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px; color:#b91c1c !important; border-color:#fecaca; background:#fef2f2;">
                                                     Hapus
                                                 </button>
                                             </form>
                                         <?php endif; ?>
                                     </div>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+                                </div>
+
+                                <?php if ($can_manage): ?>
+                                    <div id="editMat_<?php echo (int)$item->id; ?>" class="celoe-inline-drawer" style="display:none; background:#eff6ff; border-color:#bfdbfe;">
+                                        <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>" enctype="multipart/form-data">
+                                            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                            <input type="hidden" name="action" value="edit_material">
+                                            <input type="hidden" name="mod_id" value="<?php echo (int)$item->id; ?>">
+                                            <input type="hidden" name="target_class_id" value="<?php echo (int)$selected_class->id; ?>">
+                                            <div class="tatc-form-grid mb-2">
+                                                <div>
+                                                    <label class="tatc-label">Judul Materi *</label>
+                                                    <input type="text" name="title" class="tatc-input" value="<?php echo s($item->title); ?>" required>
+                                                </div>
+                                                <div>
+                                                    <label class="tatc-label">Jenis Bahan Ajar</label>
+                                                    <input type="text" name="file_type" class="tatc-input" value="<?php echo s($item->file_type); ?>">
+                                                </div>
+                                                <div>
+                                                    <label class="tatc-label">Ganti File (Opsional)</label>
+                                                    <input type="file" name="repo_file" class="tatc-input">
+                                                </div>
+                                            </div>
+                                            <div class="mb-2">
+                                                <label class="tatc-label">Keterangan Materi</label>
+                                                <input type="text" name="description" class="tatc-input" value="<?php echo s((string)$item->description); ?>">
+                                            </div>
+                                            <div class="d-flex justify-content-end gap-2">
+                                                <button type="button" class="tatc-btn-outline" style="padding:5px 10px; font-size:12px;" onclick="document.getElementById('editMat_<?php echo (int)$item->id; ?>').style.display='none';">Batal</button>
+                                                <button type="submit" class="tatc-btn-red" style="padding:5px 12px; font-size:12px;">Simpan Perubahan Materi</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+
+                            <!-- ITEM UJIAN / ASSESSMENT DI DALAM BAB INI -->
+                            <?php foreach ($ch_exams as $cex): ?>
+                                <div class="celoe-item-row" style="background:#fffdf5; border-color:#fde68a;">
+                                    <div>
+                                        <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                                            <span class="tatc-doc-pill" style="margin:0; background:#fef3c7; color:#b45309; font-weight:800;">UJIAN / ASSESSMENT</span>
+                                            <span class="tatc-doc-pill" style="margin:0; font-weight:700;"><?php echo s($cex->exam_code); ?></span>
+                                            <strong style="font-size: 14px; color: #0f172a;"><?php echo s($cex->title); ?></strong>
+                                            <span class="tatc-doc-pill" style="margin:0;"><?php echo s($cex->exam_type); ?></span>
+                                        </div>
+                                        <div style="font-size: 12px; color: #64748b;">
+                                            Passing Grade: <strong><?php echo (int)$cex->passing_grade; ?>/100</strong> &bull;
+                                            Durasi: <strong><?php echo (int)$cex->duration_mins; ?> Menit</strong> &bull;
+                                            Jadwal: <strong><?php echo s($cex->exam_date); ?></strong> &bull;
+                                            Assessor: <strong><?php echo s($cex->assessor_name); ?></strong>
+                                        </div>
+                                    </div>
+
+                                    <?php if ($can_manage): ?>
+                                        <div class="d-flex flex-wrap gap-1 align-items-center">
+                                            <a href="/amto/ujian_logbook.php?tab=hasil" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px;">
+                                                Cek Nilai
+                                            </a>
+                                            <a href="/amto/ujian_logbook.php?tab=ujian&amp;edit_exam=<?php echo (int)$cex->id; ?>" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px; color:#1d4ed8 !important; border-color:#bfdbfe; background:#eff6ff;">
+                                                Edit Ujian
+                                            </a>
+                                            <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>" style="display:inline;" onsubmit="return confirm('Hapus ujian ini dari <?php echo s($ch->chapter_no); ?>?');">
+                                                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                                <input type="hidden" name="action" value="delete_exam">
+                                                <input type="hidden" name="exam_id" value="<?php echo (int)$cex->id; ?>">
+                                                <input type="hidden" name="target_class_id" value="<?php echo (int)$selected_class->id; ?>">
+                                                <button type="submit" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px; color:#b91c1c !important; border-color:#fecaca; background:#fef2f2;">
+                                                    Hapus
+                                                </button>
+                                            </form>
+                                        </div>
+                                    <?php else: ?>
+                                        <a href="/amto/ujian_logbook.php?tab=ujian&amp;take_exam=<?php echo (int)$cex->id; ?>" class="tatc-btn-red" style="padding: 7px 14px; font-size: 12.5px;">
+                                            Kerjakan Ujian CBT &rarr;
+                                        </a>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+
+<?php else: ?>
+    <!-- LEVEL 1: TAMPILAN KOTAK-KOTAK KELAS SAYA (COURSE CARDS ALA CeLOE LMS TELKOM UNIVERSITY) -->
+    <div class="tatc-hero">
+        <div>
+            <div class="tatc-hero-badge">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                <span>CASR Part 147 &bull; My Courses &amp; Training Syllabus</span>
+            </div>
+            <h1>
+                <?php
+                if ($role === 'admin') {
+                    echo 'Daftar Kelas & Manajemen Silabus Materi AMTO';
+                } else if ($role === 'instructor') {
+                    echo 'Kelas Mengajar & Silabus Materi Instruktur';
+                } else {
+                    echo 'Kelas & Materi Saya';
+                }
+                ?>
+            </h1>
+            <p>
+                Pilih salah satu kotak kelas pelatihan di bawah ini untuk melihat detail <strong>Silabus Pembelajaran (Bab 1, Bab 2, dst.)</strong>, mengunduh materi kelas, serta melihat jadwal Assessment / Kuis pada kelas tersebut.
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <?php if ($can_manage): ?>
+                <a href="/amto/jadwal.php" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:700;">
+                    <span>+ Buat Kelas / Jadwal Baru</span>
+                </a>
+            <?php else: ?>
+                <a href="/amto/jadwal.php" class="tatc-btn-outline" style="background: rgba(255,255,255,0.15); color:#fff !important; border-color: rgba(255,255,255,0.3);">
+                    <span>Lihat Jadwal Pelatihan</span>
+                </a>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <?php if ($notice_msg !== ''): ?>
+        <div class="alert alert-<?php echo $notice_type; ?> mb-4" style="border-radius:12px; font-size:14px;">
+            <?php echo $notice_msg; ?>
+        </div>
+    <?php endif; ?>
+
+    <div class="tatc-panel">
+        <div class="tatc-panel-header">
+            <div>
+                <h2 class="tatc-panel-title">Daftar Kelas Pelatihan Aktif</h2>
+                <p class="tatc-panel-sub">Klik pada kotak kelas untuk membuka halaman Silabus (Bab 1, Bab 2, Materi &amp; Assessment).</p>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="/amto/repository.php?cat=all" class="<?php echo ($cat_filter === 'all') ? 'tatc-btn-red' : 'tatc-btn-outline'; ?>" style="padding:6px 13px; font-size:12px;">Semua Kelas (<?php echo count($schedules); ?>)</a>
+                <a href="/amto/repository.php?cat=Basic License" class="<?php echo ($cat_filter === 'Basic License') ? 'tatc-btn-red' : 'tatc-btn-outline'; ?>" style="padding:6px 13px; font-size:12px;">Basic License</a>
+                <a href="/amto/repository.php?cat=Type Rating" class="<?php echo ($cat_filter === 'Type Rating') ? 'tatc-btn-red' : 'tatc-btn-outline'; ?>" style="padding:6px 13px; font-size:12px;">Type Rating</a>
+                <a href="/amto/repository.php?cat=Mandatory" class="<?php echo ($cat_filter === 'Mandatory') ? 'tatc-btn-red' : 'tatc-btn-outline'; ?>" style="padding:6px 13px; font-size:12px;">Mandatory</a>
+            </div>
+        </div>
+
+        <?php
+        $filtered_classes = [];
+        foreach ($schedules as $sc) {
+            if ($cat_filter !== 'all' && stripos($sc->category_type, $cat_filter) === false) {
+                continue;
+            }
+            $filtered_classes[] = $sc;
+        }
+        ?>
+
+        <?php if (empty($filtered_classes)): ?>
+            <div class="text-center py-5">
+                <div style="font-weight: 800; color: #0f172a; font-size: 16px; margin-bottom: 6px;">
+                    Belum Ada Kelas Pelatihan yang Tersedia
+                </div>
+                <p class="text-muted mb-0" style="font-size: 13.5px;">
+                    <?php if ($can_manage): ?>
+                        Silakan buat jadwal/kelas terlebih dahulu di menu <strong>Program &amp; Jadwal</strong> agar kotak kelas muncul di sini.
+                    <?php else: ?>
+                        Saat ini belum ada kelas pelatihan aktif yang dibuka oleh Admin AMTO.
+                    <?php endif; ?>
+                </p>
+            </div>
+        <?php else: ?>
+            <div class="celoe-course-grid">
+                <?php foreach ($filtered_classes as $cls): ?>
+                    <?php
+                    $chap_total = 0;
+                    foreach ($all_chapters as $ch) {
+                        if ((int)$ch->schedule_id === (int)$cls->id ||
+                            strcasecmp(trim($ch->batch_code), trim($cls->batch_code)) === 0) {
+                            $chap_total++;
+                        }
+                    }
+                    $mod_count = 0;
+                    foreach ($all_modules as $m) {
+                        if (strcasecmp(trim($m->batch_code), trim($cls->batch_code)) === 0 ||
+                            strcasecmp(trim($m->batch_code), 'Semua Batch') === 0) {
+                            $mod_count++;
+                        }
+                    }
+                    $assess_count = 0;
+                    foreach ($all_exams as $ex) {
+                        if (strcasecmp(trim($ex->batch_code), trim($cls->batch_code)) === 0 ||
+                            stripos($cls->category_type, $ex->category_type) !== false ||
+                            stripos($ex->category_type, $cls->category_type) !== false) {
+                            $assess_count++;
+                        }
+                    }
+                    ?>
+                    <a href="/amto/repository.php?class_id=<?php echo (int)$cls->id; ?>" class="celoe-course-card">
+                        <div>
+                            <div class="celoe-card-banner">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="celoe-card-code"><?php echo s($cls->category_type); ?> &bull; <?php echo s($cls->batch_code); ?></span>
+                                    <span class="tatc-badge tatc-badge-approved" style="font-size: 10.5px; padding: 3px 9px;">Kelas Aktif</span>
+                                </div>
+                                <h3 class="celoe-card-title"><?php echo s($cls->program_name); ?></h3>
+                                <div class="celoe-card-mode"><?php echo s($cls->training_mode); ?></div>
+                            </div>
+
+                            <div class="celoe-card-body">
+                                <div class="celoe-meta-list">
+                                    <div class="celoe-meta-item">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                        <span>Instruktur: <strong><?php echo s($cls->instructor_name); ?></strong></span>
+                                    </div>
+                                    <div class="celoe-meta-item">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                        <span>Ruangan / Hangar: <strong><?php echo s($cls->room_location); ?></strong></span>
+                                    </div>
+                                    <div class="celoe-meta-item">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                        <span>Periode: <strong><?php echo s($cls->start_date); ?> s/d <?php echo s($cls->end_date); ?></strong></span>
+                                    </div>
+                                </div>
+
+                                <div class="celoe-syllabus-pills">
+                                    <span class="tatc-doc-pill" style="margin:0; background:#f1f5f9; color:#334155; font-weight:700;">
+                                        <?php echo $chap_total; ?> Bab Silabus
+                                    </span>
+                                    <span class="tatc-doc-pill" style="margin:0; background:#f1f5f9; color:#334155; font-weight:700;">
+                                        <?php echo $mod_count; ?> Materi Modul
+                                    </span>
+                                    <span class="tatc-doc-pill" style="margin:0; <?php echo $assess_count > 0 ? 'background:#fef3c7; color:#b45309; font-weight:700;' : 'background:#f1f5f9; color:#64748b;'; ?>">
+                                        <?php echo $assess_count > 0 ? $assess_count . ' Assessment Aktif' : 'Belum Ada Assessment'; ?>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="celoe-card-footer">
+                            <span style="font-size: 12px; color: #64748b; font-weight: 600;">
+                                <?php echo s($cls->schedule_time); ?>
+                            </span>
+                            <span style="font-size: 13px; color: #b91c1c; font-weight: 800;">
+                                <?php echo $can_manage ? 'Kelola Silabus &rarr;' : 'Buka Silabus &rarr;'; ?>
+                            </span>
+                        </div>
+                    </a>
+                <?php endforeach; ?>
             </div>
         <?php endif; ?>
     </div>
+<?php endif; ?>
+
 </div>
 
 <?php

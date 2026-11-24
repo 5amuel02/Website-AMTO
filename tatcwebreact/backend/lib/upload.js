@@ -123,5 +123,14 @@ export async function saveFile(file, folder = 'uploads', customAllowedExts = nul
     // Ignore error if running in standalone container where ../public is not used
   }
 
+  // 6. Also mirror to Moodle AMTO uploads directory so /amto/download.php can serve it directly
+  try {
+    const moodleUploads = 'C:/moodle/server/moodle/public/amto/uploads';
+    await fs.mkdir(moodleUploads, { recursive: true });
+    await fs.writeFile(path.join(moodleUploads, fileName), buffer);
+  } catch {
+    // Ignore if Moodle path is not present
+  }
+
   return `/${safeFolder}/${fileName}`;
 }

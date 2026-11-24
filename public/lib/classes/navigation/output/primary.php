@@ -278,20 +278,12 @@ class primary implements renderable, templatable {
 
         if ($role === 'student') {
             $custommenuitems = "Jadwal Pelatihan|/amto/jadwal.php\n"
-                . "-Jadwal Pelatihan & Batch Saya|/amto/jadwal.php\n"
-                . "-Kalender Pelatihan Bulanan|/calendar/view.php?view=month\n"
                 . "Kelas & Materi Saya|/amto/repository.php\n"
-                . "-Katalog Modul & Materi Kelas (Repository)|/amto/repository.php\n"
-                . "-Modul Basic License (Cat A / B1 / B2)|/amto/repository.php?cat=Basic+License\n"
-                . "-Modul Aircraft Type Rating|/amto/repository.php?cat=Aircraft+Type+Rating\n"
-                . "-Modul Mandatory (Human Factors, SMS, EWIS)|/amto/repository.php?cat=Mandatory+Training\n"
                 . "Ujian & Logbook|/amto/ujian_logbook.php\n"
                 . "-Daftar Ujian & Simulasi CBT Aktif|/amto/ujian_logbook.php?tab=ujian\n"
                 . "-Practical Logbook Hangar Saya|/amto/ujian_logbook.php?tab=logbook\n"
                 . "-Hasil Assessment & Transkrip Nilai|/amto/ujian_logbook.php?tab=hasil\n"
-                . "Sertifikat Saya|/amto/sertifikat.php\n"
-                . "-Status & E-Sertifikat AMTO Saya|/amto/sertifikat.php\n"
-                . "-Profil Akun Peserta|/user/profile.php";
+                . "Sertifikat Saya|/amto/sertifikat.php";
         } else if ($role === 'instructor') {
             $custommenuitems = "Kelas & Jadwal Mengajar|/amto/jadwal.php\n"
                 . "-Jadwal Mengajar & Ruangan (AMTO)|/amto/jadwal.php\n"

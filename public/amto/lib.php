@@ -92,11 +92,32 @@ function amto_ensure_tables(): void {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
         $DB->execute($sql);
     } else {
-        // [SEC-FIX-03] DP-09 Ensure SHA-256 file_hash column exists for document integrity
+        // [SEC-FIX-03] DP-09 Ensure SHA-256 file_hash column and CeLOE syllabus columns exist
         $cols = $DB->get_columns('amto_repository', false);
         if (!isset($cols['file_hash'])) {
             try {
                 $DB->execute("ALTER TABLE {amto_repository} ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64) NOT NULL DEFAULT '' AFTER file_size");
+            } catch (Throwable $e) {
+                // Column already exists
+            }
+        }
+        if (!isset($cols['chapter_no'])) {
+            try {
+                $DB->execute("ALTER TABLE {amto_repository} ADD COLUMN IF NOT EXISTS chapter_no VARCHAR(50) NOT NULL DEFAULT 'Bab 1' AFTER batch_code");
+            } catch (Throwable $e) {
+                // Column already exists
+            }
+        }
+        if (!isset($cols['has_assessment'])) {
+            try {
+                $DB->execute("ALTER TABLE {amto_repository} ADD COLUMN IF NOT EXISTS has_assessment VARCHAR(100) NOT NULL DEFAULT 'Tidak Ada Assessment' AFTER description");
+            } catch (Throwable $e) {
+                // Column already exists
+            }
+        }
+        if (!isset($cols['chapter_id'])) {
+            try {
+                $DB->execute("ALTER TABLE {amto_repository} ADD COLUMN IF NOT EXISTS chapter_id BIGINT(10) NOT NULL DEFAULT 0 AFTER batch_code");
             } catch (Throwable $e) {
                 // Column already exists
             }
@@ -112,6 +133,22 @@ function amto_ensure_tables(): void {
                 }
             }
         }
+    }
+
+    // 3b. Table: amto_chapters (CeLOE-style Course Sections / Wadah Bab Silabus)
+    if (!$dbman->table_exists('amto_chapters')) {
+        $sql = "CREATE TABLE {amto_chapters} (
+            id BIGINT(10) NOT NULL AUTO_INCREMENT,
+            schedule_id BIGINT(10) NOT NULL DEFAULT 0,
+            batch_code VARCHAR(80) NOT NULL,
+            chapter_no VARCHAR(50) NOT NULL DEFAULT 'Bab 1',
+            title VARCHAR(255) NOT NULL,
+            description TEXT DEFAULT NULL,
+            status VARCHAR(30) NOT NULL DEFAULT 'Active',
+            timecreated BIGINT(10) NOT NULL DEFAULT 0,
+            PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        $DB->execute($sql);
     }
 
     // 4. Table: amto_audit_logs (Immutable Security Audit Trail per SEC-05 & LOG-01 s/d LOG-09)
@@ -146,6 +183,8 @@ function amto_ensure_tables(): void {
             title VARCHAR(255) NOT NULL,
             category_type VARCHAR(100) NOT NULL DEFAULT 'Basic License',
             batch_code VARCHAR(80) NOT NULL DEFAULT 'BATCH-AMTO-2601',
+            chapter_id BIGINT(10) NOT NULL DEFAULT 0,
+            chapter_no VARCHAR(50) NOT NULL DEFAULT 'Bab 1',
             exam_type VARCHAR(80) NOT NULL DEFAULT 'Written CBT (Multiple Choice)',
             passing_grade INT(10) NOT NULL DEFAULT 75,
             duration_mins INT(10) NOT NULL DEFAULT 60,
@@ -156,6 +195,20 @@ function amto_ensure_tables(): void {
             PRIMARY KEY (id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
         $DB->execute($sql);
+    } else {
+        $ex_cols = $DB->get_columns('amto_exams', false);
+        if (!isset($ex_cols['chapter_id'])) {
+            try {
+                $DB->execute("ALTER TABLE {amto_exams} ADD COLUMN IF NOT EXISTS chapter_id BIGINT(10) NOT NULL DEFAULT 0 AFTER batch_code");
+            } catch (Throwable $e) {
+            }
+        }
+        if (!isset($ex_cols['chapter_no'])) {
+            try {
+                $DB->execute("ALTER TABLE {amto_exams} ADD COLUMN IF NOT EXISTS chapter_no VARCHAR(50) NOT NULL DEFAULT 'Bab 1' AFTER chapter_id");
+            } catch (Throwable $e) {
+            }
+        }
     }
 
     // 6. Table: amto_exam_results (Hasil Ujian & Nilai Assessment Peserta)

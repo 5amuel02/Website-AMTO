@@ -35,6 +35,7 @@ if (!in_array($active_tab, ['ujian', 'logbook', 'hasil'], true)) {
 $action = optional_param('action', '', PARAM_ALPHANUMEXT);
 $msg = trim(optional_param('msg', '', PARAM_TEXT));
 $take_exam_id = optional_param('take_exam', 0, PARAM_INT);
+$edit_exam_id = optional_param('edit_exam', 0, PARAM_INT);
 
 // Handle POST Actions with CSRF sesskey protection
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -168,6 +169,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if ($action === 'edit_exam' && $can_manage_exam) {
+        $exam_id = required_param('exam_id', PARAM_INT);
+        $e = $DB->get_record('amto_exams', ['id' => $exam_id]);
+        if ($e) {
+            $e->exam_code     = strtoupper(trim(optional_param('exam_code', $e->exam_code, PARAM_TEXT)));
+            $e->title         = trim(optional_param('title', $e->title, PARAM_TEXT));
+            $e->batch_code    = trim(optional_param('batch_code', $e->batch_code, PARAM_TEXT));
+            $e->exam_type     = trim(optional_param('exam_type', $e->exam_type, PARAM_TEXT));
+            $e->passing_grade = max(50, min(100, optional_param('passing_grade', (int)$e->passing_grade, PARAM_INT)));
+            $e->duration_mins = max(15, optional_param('duration_mins', (int)$e->duration_mins, PARAM_INT));
+            $e->exam_date     = trim(optional_param('exam_date', $e->exam_date, PARAM_TEXT));
+            $e->assessor_name = trim(optional_param('assessor_name', $e->assessor_name, PARAM_TEXT));
+            $DB->update_record('amto_exams', $e);
+            amto_log_audit_event('EXAM_UPDATE', 'amto_exams', (int)$exam_id, "exam_code={$e->exam_code}", "Updated exam {$e->title}");
+            header('Location: /amto/ujian_logbook.php?tab=ujian&msg=' . urlencode("Data Ujian [{$e->exam_code}] {$e->title} berhasil diperbarui."));
+            exit;
+        }
+    }
+
+    if ($action === 'delete_exam' && $can_manage_exam) {
+        $exam_id = required_param('exam_id', PARAM_INT);
+        $e = $DB->get_record('amto_exams', ['id' => $exam_id]);
+        if ($e) {
+            $e->status = 'Voided';
+            $DB->update_record('amto_exams', $e);
+            $DB->delete_records('amto_exam_results', ['exam_id' => $exam_id]);
+            try {
+                $DB->execute("DELETE FROM tatc_web.exams WHERE code = ?", [$e->exam_code]);
+            } catch (Throwable $err) {
+            }
+            amto_log_audit_event('EXAM_VOID', 'amto_exams', (int)$exam_id, 'status=Voided', "Exam [{$e->exam_code}] voided by " . fullname($USER));
+            header('Location: /amto/ujian_logbook.php?tab=ujian&msg=' . urlencode("Ujian [{$e->exam_code}] {$e->title} beserta nilai terkait telah dihapus."));
+            exit;
+        }
+    }
+
     if ($action === 'input_grade' && $can_manage_exam) {
         $exam_id = required_param('exam_id', PARAM_INT);
         $student_username = trim(optional_param('student_username', 'peserta', PARAM_TEXT));
@@ -201,11 +238,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Fetch Data (Scoped per SCP-01 for Student vs Full for Staff)
-$exams = $DB->get_records('amto_exams', null, 'exam_date ASC, id ASC');
-$schedules = $DB->get_records('amto_schedules', null, 'start_date ASC');
+$raw_exams = $DB->get_records('amto_exams', null, 'exam_date ASC, id ASC');
+$exams = [];
+foreach ($raw_exams as $re) {
+    if (in_array(strtolower((string)$re->status), ['void', 'voided'], true)) {
+        continue;
+    }
+    $exams[$re->id] = $re;
+}
+$raw_schedules = $DB->get_records('amto_schedules', null, 'start_date ASC');
+$schedules = [];
+foreach ($raw_schedules as $rs) {
+    if (in_array(strtolower((string)$rs->status), ['void', 'voided'], true)) {
+        continue;
+    }
+    $schedules[$rs->id] = $rs;
+}
+$editing_exam = ($edit_exam_id > 0 && isset($exams[$edit_exam_id])) ? $exams[$edit_exam_id] : null;
 
 if ($is_student) {
-    $exam_results = $DB->get_records_select(
+    $raw_exam_results = $DB->get_records_select(
         'amto_exam_results',
         'userid = :uid OR LOWER(username) = :uname',
         ['uid' => $USER->id, 'uname' => strtolower($USER->username)],
@@ -218,8 +270,17 @@ if ($is_student) {
         'practice_date DESC, id DESC'
     );
 } else {
-    $exam_results = $DB->get_records('amto_exam_results', null, 'timecreated DESC');
+    $raw_exam_results = $DB->get_records('amto_exam_results', null, 'timecreated DESC');
     $logbooks = $DB->get_records('amto_logbooks', null, 'practice_date DESC, id DESC');
+}
+
+// Only include exam results belonging to active (non-voided) exams
+$exam_results = [];
+foreach ($raw_exam_results as $rer) {
+    if (!isset($exams[$rer->exam_id])) {
+        continue;
+    }
+    $exam_results[$rer->id] = $rer;
 }
 
 $verified_logs = 0;
@@ -443,9 +504,32 @@ echo amto_render_shared_styles();
                             <div style="font-size:12px; color:#64748b;"><?php echo s($ex->assessor_name); ?></div>
                         </td>
                         <td>
-                            <a href="/amto/ujian_logbook.php?tab=ujian&amp;take_exam=<?php echo (int)$ex->id; ?>" class="tatc-btn-red" style="padding:6px 12px; font-size:12px;">
-                                Kerjakan CBT
-                            </a>
+                            <?php if ($can_manage_exam): ?>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <a href="/amto/ujian_logbook.php?tab=hasil" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px;">
+                                        Cek Hasil
+                                    </a>
+                                    <a href="/amto/ujian_logbook.php?tab=ujian&amp;edit_exam=<?php echo (int)$ex->id; ?>" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px; color:#1d4ed8 !important; border-color:#bfdbfe; background:#eff6ff;">
+                                        Edit
+                                    </a>
+                                    <form method="post" action="/amto/ujian_logbook.php?tab=ujian" style="display:inline;" onsubmit="return confirm('Hapus ujian ini?');">
+                                        <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                        <input type="hidden" name="action" value="delete_exam">
+                                        <input type="hidden" name="exam_id" value="<?php echo (int)$ex->id; ?>">
+                                        <button type="submit" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px; color:#b91c1c !important; border-color:#fecaca; background:#fef2f2;">
+                                            Hapus
+                                        </button>
+                                    </form>
+                                </div>
+                            <?php elseif ($is_student): ?>
+                                <a href="/amto/ujian_logbook.php?tab=ujian&amp;take_exam=<?php echo (int)$ex->id; ?>" class="tatc-btn-red" style="padding:6px 12px; font-size:12px;">
+                                    Kerjakan CBT
+                                </a>
+                            <?php else: ?>
+                                <a href="/amto/ujian_logbook.php?tab=hasil" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px;">
+                                    Lihat Nilai
+                                </a>
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>
@@ -453,6 +537,64 @@ echo amto_render_shared_styles();
             </table>
         </div>
     </div>
+
+    <?php if ($can_manage_exam && $editing_exam): ?>
+    <div class="tatc-panel" style="border: 2px solid #2563eb; background: #f8fafc;">
+        <div class="tatc-panel-header">
+            <div>
+                <h2 class="tatc-panel-title">Edit Data Ujian: [<?php echo s($editing_exam->exam_code); ?>] <?php echo s($editing_exam->title); ?></h2>
+                <p class="tatc-panel-sub">Perbarui kode, judul, batch, tanggal pelaksanaan, durasi, atau nilai Passing Grade ujian ini.</p>
+            </div>
+            <a href="/amto/ujian_logbook.php?tab=ujian" class="tatc-btn-outline">Batal Edit</a>
+        </div>
+        <form method="post" action="/amto/ujian_logbook.php?tab=ujian">
+            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+            <input type="hidden" name="action" value="edit_exam">
+            <input type="hidden" name="exam_id" value="<?php echo (int)$editing_exam->id; ?>">
+            <div class="tatc-form-grid">
+                <div>
+                    <label class="tatc-label">Kode Ujian *</label>
+                    <input type="text" name="exam_code" class="tatc-input" value="<?php echo s($editing_exam->exam_code); ?>" required>
+                </div>
+                <div>
+                    <label class="tatc-label">Judul Modul Ujian *</label>
+                    <input type="text" name="title" class="tatc-input" value="<?php echo s($editing_exam->title); ?>" required>
+                </div>
+                <div>
+                    <label class="tatc-label">Batch Pelatihan</label>
+                    <select name="batch_code" class="tatc-select">
+                        <?php foreach ($schedules as $sc): ?>
+                            <option value="<?php echo s($sc->batch_code); ?>" <?php echo ($editing_exam->batch_code === $sc->batch_code) ? 'selected' : ''; ?>><?php echo s($sc->batch_code . ' – ' . $sc->program_name); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div>
+                    <label class="tatc-label">Metode Evaluasi</label>
+                    <select name="exam_type" class="tatc-select">
+                        <option value="Written CBT (Multiple Choice)" <?php echo ($editing_exam->exam_type === 'Written CBT (Multiple Choice)') ? 'selected' : ''; ?>>Written CBT (Multiple Choice)</option>
+                        <option value="Written Essay Exam" <?php echo ($editing_exam->exam_type === 'Written Essay Exam') ? 'selected' : ''; ?>>Written Essay Exam</option>
+                        <option value="Practical Assessment (Hangar)" <?php echo ($editing_exam->exam_type === 'Practical Assessment (Hangar)') ? 'selected' : ''; ?>>Practical Assessment (Hangar)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="tatc-label">Tanggal Ujian</label>
+                    <input type="date" name="exam_date" class="tatc-input" value="<?php echo s($editing_exam->exam_date); ?>">
+                </div>
+                <div>
+                    <label class="tatc-label">Durasi (Menit) &amp; Passing Grade</label>
+                    <div class="d-flex gap-2">
+                        <input type="number" name="duration_mins" class="tatc-input" value="<?php echo (int)$editing_exam->duration_mins; ?>" min="15">
+                        <input type="number" name="passing_grade" class="tatc-input" value="<?php echo (int)$editing_exam->passing_grade; ?>" min="50" max="100">
+                    </div>
+                </div>
+            </div>
+            <div class="mt-3 d-flex justify-content-end gap-2">
+                <a href="/amto/ujian_logbook.php?tab=ujian" class="tatc-btn-outline">Batal</a>
+                <button type="submit" class="tatc-btn-red">Simpan Perubahan Ujian</button>
+            </div>
+        </form>
+    </div>
+    <?php endif; ?>
 
     <?php if ($can_manage_exam): ?>
     <div class="tatc-panel">
