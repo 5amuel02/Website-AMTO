@@ -146,9 +146,7 @@ $test_accounts = [
     ],
     [
         'username'      => 'Ema',
-        'old_usernames' => ['ema'],
         'email'         => 'emacdef@telkomuniversity.ac.id',
-        'old_emails'    => [],
         'firstname'     => 'Ema',
         'lastname'      => '',
         'role'          => 'r04_trainingmanager',
@@ -157,9 +155,7 @@ $test_accounts = [
     ],
     [
         'username'      => 'Juhandi',
-        'old_usernames' => ['trainingmanager', 'juhandi'],
         'email'         => 'juhandi@gmail.com',
-        'old_emails'    => ['tm@tatc.id'],
         'firstname'     => 'Juhandi',
         'lastname'      => '',
         'role'          => 'r04_trainingmanager',
@@ -168,9 +164,7 @@ $test_accounts = [
     ],
     [
         'username'      => 'ImanJM',
-        'old_usernames' => ['certofficer', 'imanjm'],
         'email'         => 'imanjanuar44@gmail.com',
-        'old_emails'    => ['cert@tatc.id'],
         'password'      => 'Imanjanuar12345',
         'firstname'     => 'Iman',
         'lastname'      => 'Januar M',
@@ -179,9 +173,7 @@ $test_accounts = [
     ],
     [
         'username'      => 'Beng Tardjani',
-        'old_usernames' => ['qa', 'bengtardjani', 'beng tardjani'],
         'email'         => 'Btardjani81@gmail.com',
-        'old_emails'    => ['qa@tatc.id'],
         'password'      => 'Btardjani12345',
         'firstname'     => 'Beng',
         'lastname'      => 'Tardjani',
@@ -225,9 +217,7 @@ $test_accounts = [
     ],
     [
         'username'      => 'anggarusdinar',
-        'old_usernames' => ['management', 'manajemen'],
         'email'         => 'anggarusdinar@telkomuniversity.ac.id',
-        'old_emails'    => ['manajemen@tatc.id', 'management@tatc.id'],
         'password'      => 'anggarusdinar12345',
         'firstname'     => 'Angga',
         'lastname'      => 'Rusdinar',
