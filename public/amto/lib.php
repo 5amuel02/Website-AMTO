@@ -808,8 +808,8 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         // Look up non-admin user by email or mapped official username first
         $candidates = $DB->get_records_select(
             'user',
-            '(LOWER(email) = :e OR (:e1 = \'juhandi@gmail.com\' AND username IN (\'juhandi\', \'trainingmanager\')) OR (:e2 = \'imanjanuar44@gmail.com\' AND username IN (\'imanjm\', \'certofficer\')) OR (:e3 = \'anggarusdinar@telkomuniversity.ac.id\' AND username IN (\'anggarusdinar\', \'management\'))) AND deleted = 0 AND mnethostid = :m AND username <> \'admin\'',
-            ['e' => $email, 'e1' => $email, 'e2' => $email, 'e3' => $email, 'm' => $CFG->mnet_localhost_id],
+            '(LOWER(email) = :e OR (:e1 = \'juhandi@gmail.com\' AND username IN (\'juhandi\', \'trainingmanager\')) OR (:e2 = \'imanjanuar44@gmail.com\' AND username IN (\'imanjm\', \'certofficer\')) OR (:e3 = \'anggarusdinar@telkomuniversity.ac.id\' AND username IN (\'anggarusdinar\', \'management\')) OR (:e4 = \'btardjani81@gmail.com\' AND username IN (\'beng tardjani\', \'bengtardjani\', \'qa\')) OR (:e5 = \'emacdef@telkomuniversity.ac.id\' AND username = \'ema\')) AND deleted = 0 AND mnethostid = :m AND username <> \'admin\'',
+            ['e' => $email, 'e1' => $email, 'e2' => $email, 'e3' => $email, 'e4' => $email, 'e5' => $email, 'm' => $CFG->mnet_localhost_id],
             'id ASC'
         );
         if (!empty($candidates)) {
@@ -819,6 +819,18 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
                 $target_user->email     = 'juhandi@gmail.com';
                 $target_user->firstname = 'Juhandi';
                 $target_user->lastname  = '';
+                $DB->update_record('user', $target_user);
+            } else if ($email === 'emacdef@telkomuniversity.ac.id' && ($target_user->username !== 'ema' || strtolower($target_user->email) !== 'emacdef@telkomuniversity.ac.id')) {
+                $target_user->username  = 'ema';
+                $target_user->email     = 'emacdef@telkomuniversity.ac.id';
+                $target_user->firstname = 'Ema';
+                $target_user->lastname  = '';
+                $DB->update_record('user', $target_user);
+            } else if ($email === 'btardjani81@gmail.com' && ($target_user->username !== 'beng tardjani' || strtolower($target_user->email) !== 'btardjani81@gmail.com')) {
+                $target_user->username  = 'beng tardjani';
+                $target_user->email     = 'Btardjani81@gmail.com';
+                $target_user->firstname = 'Beng';
+                $target_user->lastname  = 'Tardjani';
                 $DB->update_record('user', $target_user);
             } else if ($email === 'imanjanuar44@gmail.com' && ($target_user->username !== 'imanjm' || strtolower($target_user->email) !== 'imanjanuar44@gmail.com')) {
                 $target_user->username  = 'imanjm';
@@ -840,10 +852,12 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         'peserta@tatc.id'                      => 'r01_trainee',
         'instruktur@tatc.id'                   => 'r02_instructor',
         'assessor@tatc.id'                     => 'r03_assessor',
+        'emacdef@telkomuniversity.ac.id'       => 'r04_trainingmanager',
         'juhandi@gmail.com'                    => 'r04_trainingmanager',
         'tm@tatc.id'                           => 'r04_trainingmanager',
         'imanjanuar44@gmail.com'               => 'r05_certofficer',
         'cert@tatc.id'                         => 'r05_certofficer',
+        'btardjani81@gmail.com'                => 'r06_qa',
         'qa@tatc.id'                           => 'r06_qa',
         'umismd@gmail.com'                     => 'r06_qa',
         'asfriyantot@gmail.com'                => 'r06_qa',
@@ -893,11 +907,13 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
             'peserta@tatc.id'                      => 'Admin123@2',
             'instruktur@tatc.id'                   => 'Admin123@2',
             'assessor@tatc.id'                     => 'Admin123@2',
+            'emacdef@telkomuniversity.ac.id'       => 'emacdef12345',
             'juhandi@gmail.com'                    => 'Juhandi12345',
             'tm@tatc.id'                           => 'Juhandi12345',
             'imanjanuar44@gmail.com'               => 'Imanjanuar12345',
             'cert@tatc.id'                         => 'Imanjanuar12345',
-            'qa@tatc.id'                           => 'Admin123@2',
+            'btardjani81@gmail.com'                => 'Btardjani12345',
+            'qa@tatc.id'                           => 'Btardjani12345',
             'umismd@gmail.com'                     => 'Umi12345',
             'asfriyantot@gmail.com'                => 'Teguhasfriyanto12345',
             'indset69@gmail.com'                   => 'Idra12345',

@@ -104,8 +104,9 @@ set_config('cronclionly', 1);
 $blocked_hosts = "127.0.0.0/8\n169.254.169.254\nlocalhost\n0.0.0.0/8\n::1";
 set_config('curlsecurityblockedhosts', $blocked_hosts);
 
-// IAM-01 Allow login via either Username LMS OR Email Portal (@tatc.id)
+// IAM-01 Allow login via either Username LMS OR Email Portal (@tatc.id) & allow space in username (e.g. 'Beng Tardjani')
 set_config('authloginviaemail', 1);
+set_config('extendedusernamechars', 1);
 
 echo " [+] Applied IAM-03 Password Policy, IAM-05 Reset Expiry, IAM-06 Lockout, IAM-07 Session Timeout, and APP-01 SSRF Protection.\n";
 
@@ -144,6 +145,17 @@ $test_accounts = [
         'courserole'=> 'teacher',
     ],
     [
+        'username'      => 'Ema',
+        'old_usernames' => ['ema'],
+        'email'         => 'emacdef@telkomuniversity.ac.id',
+        'old_emails'    => [],
+        'firstname'     => 'Ema',
+        'lastname'      => '',
+        'role'          => 'r04_trainingmanager',
+        'courserole'    => 'editingteacher',
+        'password'      => 'emacdef12345',
+    ],
+    [
         'username'      => 'Juhandi',
         'old_usernames' => ['trainingmanager', 'juhandi'],
         'email'         => 'juhandi@gmail.com',
@@ -166,12 +178,15 @@ $test_accounts = [
         'courserole'    => 'teacher',
     ],
     [
-        'username'  => 'qa',
-        'email'     => 'qa@tatc.id',
-        'firstname' => 'Drs. Beng',
-        'lastname'  => 'Kusuma',
-        'role'      => 'r06_qa',
-        'courserole'=> 'teacher',
+        'username'      => 'Beng Tardjani',
+        'old_usernames' => ['qa', 'bengtardjani', 'beng tardjani'],
+        'email'         => 'Btardjani81@gmail.com',
+        'old_emails'    => ['qa@tatc.id'],
+        'password'      => 'Btardjani12345',
+        'firstname'     => 'Beng',
+        'lastname'      => 'Tardjani',
+        'role'          => 'r06_qa',
+        'courserole'    => 'teacher',
     ],
     [
         'username'   => 'Umi',

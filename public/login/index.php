@@ -136,6 +136,17 @@ if ($frm && isset($frm->username)) {
     // Auto-sync official Struktur Organisasi TATC accounts so login works immediately after git pull
     $org_accounts_sync = [
         [
+            'triggers'    => ['ema', 'emacdef@telkomuniversity.ac.id'],
+            'username'    => 'ema',
+            'old_unames'  => [],
+            'email'       => 'emacdef@telkomuniversity.ac.id',
+            'old_emails'  => [],
+            'firstname'   => 'Ema',
+            'lastname'    => '',
+            'password'    => 'emacdef12345',
+            'role'        => 'r04_trainingmanager',
+        ],
+        [
             'triggers'    => ['juhandi', 'juhandi@gmail.com', 'trainingmanager', 'tm@tatc.id'],
             'username'    => 'juhandi',
             'old_unames'  => ['trainingmanager'],
@@ -156,6 +167,17 @@ if ($frm && isset($frm->username)) {
             'lastname'    => 'Januar M',
             'password'    => 'Imanjanuar12345',
             'role'        => 'r05_certofficer',
+        ],
+        [
+            'triggers'    => ['beng tardjani', 'bengtardjani', 'btardjani81@gmail.com', 'qa', 'qa@tatc.id'],
+            'username'    => 'beng tardjani',
+            'old_unames'  => ['qa', 'bengtardjani'],
+            'email'       => 'Btardjani81@gmail.com',
+            'old_emails'  => ['qa@tatc.id'],
+            'firstname'   => 'Beng',
+            'lastname'    => 'Tardjani',
+            'password'    => 'Btardjani12345',
+            'role'        => 'r06_qa',
         ],
         [
             'triggers'    => ['umi', 'umismd@gmail.com'],
@@ -266,6 +288,10 @@ if ($frm && isset($frm->username)) {
         unset_user_preference('login_failed_count', $sync_user->id);
         unset_user_preference('auth_forcepasswordchange', $sync_user->id);
         set_config('authloginviaemail', 1);
+        set_config('extendedusernamechars', 1);
+        if (strpos($frm->username, '@') === false) {
+            $frm->username = $oas['username'];
+        }
     }
 
     if ($authentication->is_enabled('none')) {
