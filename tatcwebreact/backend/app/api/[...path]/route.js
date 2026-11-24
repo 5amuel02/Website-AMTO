@@ -63,6 +63,25 @@ function isReadOnlyAuditSession(subject) {
   return READ_ONLY_ADMIN_EMAILS.includes(email) || READ_ONLY_ADMIN_ROLES.includes(rawRole);
 }
 
+function maskNik(nik) {
+  const clean = String(nik || '').trim();
+  if (clean.length <= 6) return '*'.repeat(Math.max(4, clean.length));
+  return clean.slice(0, 4) + '*'.repeat(clean.length - 7) + clean.slice(-3);
+}
+
+function maskPhone(phone) {
+  const clean = String(phone || '').trim();
+  if (clean.length <= 5) return '*'.repeat(Math.max(4, clean.length));
+  return clean.slice(0, 4) + '*'.repeat(clean.length - 6) + clean.slice(-2);
+}
+
+function maskEmail(email) {
+  const parts = String(email || '').trim().split('@');
+  if (parts.length !== 2) return '***';
+  const [local, domain] = parts;
+  return local.slice(0, Math.min(2, local.length)) + '***@' + domain;
+}
+
 /**
  * Penegakan Kebijakan Keamanan SCP-06 (Quality Assurance Read-Only Audit) &
  * SCP-07 (Manajemen Read-Only Executive): mencegah operasi tulis/mutasi data (POST/PUT/DELETE).
@@ -1326,31 +1345,56 @@ export async function GET(request, context) {
           ORDER BY start_date ASC, id ASC`
       ).catch(() => [[]]);
 
-      let registrations = [];
+      // SEC-Samuel-01 (IAM-03, DP-01, DP-02, SCP-01 & SCP-07):
+      // Jangan pernah mengekspor kolom password_hash dari mdl_amto_registrations,
+      // serta terapkan PII Masking (NIK, No. Telepon, Email) untuk pencarian lintas akun & view Manajemen (R08).
+      const safeCols = `id, registration_no, userid, username, fullname, nik, email, phone, organization, amel_no, schedule_id, program_name, doc_ktp, doc_ijazah, doc_pendukung, status, admin_notes, created_by, verified_by, timecreated, timemodified`;
+      let rawRegistrations = [];
       if (q !== '') {
-        [registrations] = await pool.query(
-          `SELECT * FROM moodle.mdl_amto_registrations
+        [rawRegistrations] = await pool.query(
+          `SELECT ${safeCols} FROM moodle.mdl_amto_registrations
             WHERE LOWER(status) NOT IN ('void', 'voided')
               AND (LOWER(registration_no) = LOWER(?) OR LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?))
             ORDER BY timecreated DESC`,
           [q, q, q]
         ).catch(() => [[]]);
       } else if (['SUPERADMIN', 'ADMIN'].includes(session.role)) {
-        [registrations] = await pool.query(
-          `SELECT * FROM moodle.mdl_amto_registrations
+        [rawRegistrations] = await pool.query(
+          `SELECT ${safeCols} FROM moodle.mdl_amto_registrations
             WHERE LOWER(status) NOT IN ('void', 'voided')
             ORDER BY timecreated DESC`
         ).catch(() => [[]]);
       } else {
         const uname = session.email.split('@')[0].toLowerCase();
-        [registrations] = await pool.query(
-          `SELECT * FROM moodle.mdl_amto_registrations
+        [rawRegistrations] = await pool.query(
+          `SELECT ${safeCols} FROM moodle.mdl_amto_registrations
             WHERE LOWER(status) NOT IN ('void', 'voided')
               AND (LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?))
             ORDER BY timecreated DESC`,
           [session.email, uname]
         ).catch(() => [[]]);
       }
+
+      const amtoRole = resolveAmtoRole(session);
+      const isStaffVerifier = ['R04_TM', 'R05_CERT', 'R06_QA', 'R07_ADMIN_IT'].includes(amtoRole);
+      const sessionUname = String(session.email || '').split('@')[0].toLowerCase();
+
+      const registrations = rawRegistrations.map(reg => {
+        const isOwner =
+          String(reg.email || '').trim().toLowerCase() === String(session.email || '').trim().toLowerCase() ||
+          String(reg.username || '').trim().toLowerCase() === sessionUname;
+        const canSeeFullPii = (isOwner || isStaffVerifier) && amtoRole !== 'R08_MANAGEMENT';
+        return {
+          ...reg,
+          nik: canSeeFullPii ? reg.nik : maskNik(reg.nik),
+          phone: canSeeFullPii ? reg.phone : maskPhone(reg.phone),
+          email: (isOwner || isStaffVerifier) ? reg.email : maskEmail(reg.email),
+          doc_ktp: (isOwner || isStaffVerifier) ? reg.doc_ktp : '',
+          doc_ijazah: (isOwner || isStaffVerifier) ? reg.doc_ijazah : '',
+          doc_pendukung: (isOwner || isStaffVerifier) ? reg.doc_pendukung : '',
+        };
+      });
+
       const [moodleUsers] = await pool.query(
         `SELECT id, username, firstname, lastname, email
            FROM moodle.mdl_user
