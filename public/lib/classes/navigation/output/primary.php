@@ -280,7 +280,8 @@ class primary implements renderable, templatable {
             $custommenuitems = "Jadwal Pelatihan|/amto/jadwal.php\n"
                 . "Kelas & Materi Saya|/amto/repository.php\n"
                 . "Ujian & Logbook|/amto/ujian_logbook.php\n"
-                . "-Daftar Ujian & Simulasi CBT Aktif|/amto/ujian_logbook.php?tab=ujian\n"
+                . "-Daftar Quiz & Ujian CBT|/amto/ujian_logbook.php?tab=ujian\n"
+                . "-Assignment & Penugasan Kelas|/amto/ujian_logbook.php?tab=assignment\n"
                 . "-Practical Logbook Hangar Saya|/amto/ujian_logbook.php?tab=logbook\n"
                 . "-Hasil Assessment & Transkrip Nilai|/amto/ujian_logbook.php?tab=hasil\n"
                 . "Sertifikat Saya|/amto/sertifikat.php";

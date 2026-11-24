@@ -273,7 +273,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage) {
             if (function_exists('amto_sync_cross_db')) {
                 amto_sync_cross_db(true);
             }
-            $m = "Ujian / Assessment \"[{$e->exam_code}] {$e->title}\" berhasil ditambahkan ke dalam {$chapter_no}.";
+            $m = "Quiz / Ujian \"[{$e->exam_code}] {$e->title}\" berhasil dibuat di {$chapter_no}. Klik tombol '+ Kelola Soal & Gambar' pada ujian tersebut untuk menambahkan soal Pilihan Ganda / Essay.";
+            header('Location: /amto/repository.php?class_id=' . $target_class_id . '&msg=' . urlencode($m));
+            exit;
+        }
+    }
+
+    // 7b. TAHAP 2C: Buat Assignment (Penugasan) Lengkap dengan Deadline di Dalam Bab
+    if ($action === 'add_assignment_to_chapter') {
+        $target_class_id = required_param('target_class_id', PARAM_INT);
+        $chapter_id = required_param('chapter_id', PARAM_INT);
+        $chapter_no = trim(optional_param('chapter_no', 'Bab 1', PARAM_TEXT));
+        $batch_code = trim(optional_param('batch_code', '', PARAM_TEXT));
+        $title = trim(optional_param('title', '', PARAM_TEXT));
+        $description = trim(optional_param('description', '', PARAM_TEXT));
+        $deadline_at = trim(optional_param('deadline_at', date('Y-m-d\TH:i', strtotime('+7 days')), PARAM_TEXT));
+        $passing_grade = max(50, min(100, optional_param('passing_grade', 75, PARAM_INT)));
+
+        if ($title !== '') {
+            $upload_res = amto_save_repo_file('assign_' . $chapter_id);
+            $a = new stdClass();
+            $a->schedule_id     = $target_class_id;
+            $a->batch_code      = $batch_code;
+            $a->chapter_id      = $chapter_id;
+            $a->chapter_no      = $chapter_no;
+            $a->title           = $title;
+            $a->description     = $description;
+            $a->attachment_path = $upload_res['path'];
+            $a->deadline_at     = str_replace('T', ' ', $deadline_at);
+            $a->passing_grade   = $passing_grade;
+            $a->created_by      = fullname($USER);
+            $a->status          = 'Active';
+            $a->timecreated     = time();
+            $DB->insert_record('amto_assignments', $a);
+
+            $m = "Assignment (Penugasan) \"{$title}\" dengan Deadline {$a->deadline_at} berhasil ditambahkan ke {$chapter_no}.";
+            header('Location: /amto/repository.php?class_id=' . $target_class_id . '&msg=' . urlencode($m));
+            exit;
+        }
+    }
+
+    // 7c. Edit Assignment & Deadline di Dalam Bab
+    if ($action === 'edit_assignment') {
+        $assign_id = required_param('assign_id', PARAM_INT);
+        $target_class_id = required_param('target_class_id', PARAM_INT);
+        $a = $DB->get_record('amto_assignments', ['id' => $assign_id]);
+        if ($a) {
+            $a->title         = trim(optional_param('title', $a->title, PARAM_TEXT));
+            $a->description   = trim(optional_param('description', (string)$a->description, PARAM_TEXT));
+            $raw_dl           = trim(optional_param('deadline_at', $a->deadline_at, PARAM_TEXT));
+            $a->deadline_at   = str_replace('T', ' ', $raw_dl);
+            $a->passing_grade = max(50, min(100, optional_param('passing_grade', (int)$a->passing_grade, PARAM_INT)));
+            $upload_res = amto_save_repo_file('assign_' . $assign_id);
+            if ($upload_res['path'] !== '') {
+                $a->attachment_path = $upload_res['path'];
+            }
+            $DB->update_record('amto_assignments', $a);
+            $m = "Assignment \"{$a->title}\" & Deadline ({$a->deadline_at}) berhasil diperbarui.";
+            header('Location: /amto/repository.php?class_id=' . $target_class_id . '&msg=' . urlencode($m));
+            exit;
+        }
+    }
+
+    // 7d. Hapus Assignment dari Bab
+    if ($action === 'delete_assignment') {
+        $assign_id = required_param('assign_id', PARAM_INT);
+        $target_class_id = optional_param('target_class_id', 0, PARAM_INT);
+        $a = $DB->get_record('amto_assignments', ['id' => $assign_id]);
+        if ($a) {
+            $a->status = 'Voided';
+            $DB->update_record('amto_assignments', $a);
+            $DB->delete_records('amto_assignment_submissions', ['assignment_id' => $assign_id]);
+            $m = "Assignment \"{$a->title}\" telah dihapus dari silabus.";
             header('Location: /amto/repository.php?class_id=' . $target_class_id . '&msg=' . urlencode($m));
             exit;
         }
@@ -333,6 +404,15 @@ foreach ($raw_exams as $re) {
         continue;
     }
     $all_exams[] = $re;
+}
+
+$raw_assignments = $DB->get_records('amto_assignments', null, 'id ASC');
+$all_assignments = [];
+foreach ($raw_assignments as $ra) {
+    if (in_array(strtolower((string)$ra->status), ['void', 'voided'], true)) {
+        continue;
+    }
+    $all_assignments[] = $ra;
 }
 
 $selected_class = ($class_id > 0 && isset($schedules[$class_id])) ? $schedules[$class_id] : null;
@@ -578,6 +658,14 @@ echo amto_render_shared_styles();
             $class_exams[] = $ex;
         }
     }
+
+    $class_assignments = [];
+    foreach ($all_assignments as $asg) {
+        if ((int)$asg->schedule_id === (int)$selected_class->id ||
+            strcasecmp(trim($asg->batch_code), trim($selected_class->batch_code)) === 0) {
+            $class_assignments[] = $asg;
+        }
+    }
     ?>
 
     <!-- LEVEL 2: HALAMAN SILABUS KELAS BERJENJANG (ALA CeLOE LMS TELKOM UNIVERSITY) -->
@@ -711,6 +799,14 @@ echo amto_render_shared_styles();
                         $ch_exams[] = $ex;
                     }
                 }
+                // Find assignments inside this Bab
+                $ch_assignments = [];
+                foreach ($class_assignments as $asg) {
+                    if ((int)($asg->chapter_id ?? 0) === $cid ||
+                        (empty($asg->chapter_id) && strcasecmp(trim($asg->chapter_no ?? 'Bab 1'), trim($ch->chapter_no)) === 0)) {
+                        $ch_assignments[] = $asg;
+                    }
+                }
                 ?>
 
                 <div class="celoe-chapter-card">
@@ -721,7 +817,7 @@ echo amto_render_shared_styles();
                                 <span class="celoe-chapter-badge"><?php echo s($ch->chapter_no); ?></span>
                                 <strong style="font-size: 16px; color: #0f172a;"><?php echo s($ch->title); ?></strong>
                                 <span class="tatc-doc-pill" style="margin:0;">
-                                    <?php echo count($ch_materials); ?> Materi &bull; <?php echo count($ch_exams); ?> Ujian
+                                    <?php echo count($ch_materials); ?> Materi &bull; <?php echo count($ch_exams); ?> Quiz/Ujian &bull; <?php echo count($ch_assignments); ?> Assignment
                                 </span>
                             </div>
                             <?php if (!empty($ch->description)): ?>
@@ -733,13 +829,16 @@ echo amto_render_shared_styles();
 
                         <?php if ($can_manage): ?>
                             <div class="d-flex flex-wrap gap-1 align-items-center">
-                                <button type="button" class="tatc-btn-red" style="padding: 6px 12px; font-size: 12px;" onclick="var d=document.getElementById('addMatDrawer_<?php echo $cid; ?>'); d.style.display=(d.style.display==='none'?'block':'none'); document.getElementById('addExDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('editChDrawer_<?php echo $cid; ?>').style.display='none';">
+                                <button type="button" class="tatc-btn-red" style="padding: 6px 12px; font-size: 12px;" onclick="var d=document.getElementById('addMatDrawer_<?php echo $cid; ?>'); d.style.display=(d.style.display==='none'?'block':'none'); document.getElementById('addExDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('addAsgDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('editChDrawer_<?php echo $cid; ?>').style.display='none';">
                                     + Tambah Materi
                                 </button>
-                                <button type="button" class="tatc-btn-outline" style="padding: 6px 12px; font-size: 12px; border-color:#f59e0b; color:#b45309 !important; background:#fffbeb; font-weight:700;" onclick="var d=document.getElementById('addExDrawer_<?php echo $cid; ?>'); d.style.display=(d.style.display==='none'?'block':'none'); document.getElementById('addMatDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('editChDrawer_<?php echo $cid; ?>').style.display='none';">
-                                    + Buat Ujian
+                                <button type="button" class="tatc-btn-outline" style="padding: 6px 12px; font-size: 12px; border-color:#f59e0b; color:#b45309 !important; background:#fffbeb; font-weight:700;" onclick="var d=document.getElementById('addExDrawer_<?php echo $cid; ?>'); d.style.display=(d.style.display==='none'?'block':'none'); document.getElementById('addMatDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('addAsgDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('editChDrawer_<?php echo $cid; ?>').style.display='none';">
+                                    + Buat Quiz / Ujian
                                 </button>
-                                <button type="button" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px; color:#1d4ed8 !important; border-color:#bfdbfe; background:#eff6ff;" onclick="var d=document.getElementById('editChDrawer_<?php echo $cid; ?>'); d.style.display=(d.style.display==='none'?'block':'none'); document.getElementById('addMatDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('addExDrawer_<?php echo $cid; ?>').style.display='none';">
+                                <button type="button" class="tatc-btn-outline" style="padding: 6px 12px; font-size: 12px; border-color:#8b5cf6; color:#6d28d9 !important; background:#f5f3ff; font-weight:700;" onclick="var d=document.getElementById('addAsgDrawer_<?php echo $cid; ?>'); d.style.display=(d.style.display==='none'?'block':'none'); document.getElementById('addMatDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('addExDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('editChDrawer_<?php echo $cid; ?>').style.display='none';">
+                                    + Buat Assignment
+                                </button>
+                                <button type="button" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px; color:#1d4ed8 !important; border-color:#bfdbfe; background:#eff6ff;" onclick="var d=document.getElementById('editChDrawer_<?php echo $cid; ?>'); d.style.display=(d.style.display==='none'?'block':'none'); document.getElementById('addMatDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('addExDrawer_<?php echo $cid; ?>').style.display='none'; document.getElementById('addAsgDrawer_<?php echo $cid; ?>').style.display='none';">
                                     Edit Bab
                                 </button>
                                 <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>" style="display:inline;" onsubmit="return confirm('Hapus <?php echo s($ch->chapter_no); ?> beserta seluruh materi & ujian di dalamnya?');">
@@ -825,10 +924,11 @@ echo amto_render_shared_styles();
                                             <input type="text" name="exam_code" class="tatc-input" placeholder="Otomatis jika dikosongkan">
                                         </div>
                                         <div>
-                                            <label class="tatc-label">Metode Evaluasi</label>
+                                            <label class="tatc-label">Format Quiz / Ujian *</label>
                                             <select name="exam_type" class="tatc-select">
-                                                <option value="Written CBT (Multiple Choice)">Written CBT (Multiple Choice)</option>
-                                                <option value="Written Essay Exam">Written Essay Exam</option>
+                                                <option value="Quiz Pilihan Ganda (Multiple Choice)">Pilihan Ganda (Multiple Choice)</option>
+                                                <option value="Quiz Essay (Uraian)">Essay (Uraian)</option>
+                                                <option value="Quiz Campuran (Pilihan Ganda & Essay)">Campuran (Pilihan Ganda &amp; Essay)</option>
                                                 <option value="Practical Assessment (Hangar)">Practical Assessment (Hangar)</option>
                                             </select>
                                         </div>
@@ -845,9 +945,56 @@ echo amto_render_shared_styles();
                                             <input type="number" name="passing_grade" class="tatc-input" value="75" min="50" max="100">
                                         </div>
                                     </div>
+                                    <div style="font-size:12px; color:#92400e; margin-bottom:10px;">
+                                        * Setelah Quiz dibuat, klik tombol <strong>"+ Kelola Soal &amp; Gambar"</strong> pada item Quiz tersebut untuk menambahkan butir soal <strong>Pilihan Ganda</strong> atau <strong>Essay</strong> beserta <strong>Lampiran Gambar Soal</strong>.
+                                    </div>
                                     <div class="d-flex justify-content-end gap-2">
                                         <button type="button" class="tatc-btn-outline" style="padding:6px 12px; font-size:12px;" onclick="document.getElementById('addExDrawer_<?php echo $cid; ?>').style.display='none';">Batal</button>
-                                        <button type="submit" class="tatc-btn-red" style="padding:6px 14px; font-size:12.5px;">Simpan Ujian ke <?php echo s($ch->chapter_no); ?></button>
+                                        <button type="submit" class="tatc-btn-red" style="padding:6px 14px; font-size:12.5px;">Simpan Quiz / Ujian ke <?php echo s($ch->chapter_no); ?></button>
+                                    </div>
+                                </form>
+                            </div>
+
+                            <!-- DRAWER 2B: FORM BUAT ASSIGNMENT (PENUGASAN) LENGKAP DENGAN DEADLINE DI BAB INI -->
+                            <div id="addAsgDrawer_<?php echo $cid; ?>" class="celoe-inline-drawer" style="display:none; background:#f5f3ff; border-color:#ddd6fe;">
+                                <div style="font-weight:800; color:#5b21b6; font-size:14px; margin-bottom:10px;">
+                                    Buat Assignment (Penugasan) Baru Lengkap dengan Deadline di <?php echo s($ch->chapter_no); ?> (<?php echo s($ch->title); ?>)
+                                </div>
+                                <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>" enctype="multipart/form-data">
+                                    <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                    <input type="hidden" name="action" value="add_assignment_to_chapter">
+                                    <input type="hidden" name="target_class_id" value="<?php echo (int)$selected_class->id; ?>">
+                                    <input type="hidden" name="chapter_id" value="<?php echo $cid; ?>">
+                                    <input type="hidden" name="chapter_no" value="<?php echo s($ch->chapter_no); ?>">
+                                    <input type="hidden" name="batch_code" value="<?php echo s($selected_class->batch_code); ?>">
+
+                                    <div class="tatc-form-grid mb-3">
+                                        <div>
+                                            <label class="tatc-label">Judul Assignment / Penugasan *</label>
+                                            <input type="text" name="title" class="tatc-input" placeholder="Contoh: Tugas 1 - Analisis Komponen & Troubleshooting" required>
+                                        </div>
+                                        <div>
+                                            <label class="tatc-label">Deadline Pengumpulan (Tanggal &amp; Jam Batas Akhir) *</label>
+                                            <input type="datetime-local" name="deadline_at" class="tatc-input" value="<?php echo date('Y-m-d\T23:59', strtotime('+7 days')); ?>" required>
+                                        </div>
+                                        <div>
+                                            <label class="tatc-label">Lampiran File / Gambar Soal Tugas (Opsional)</label>
+                                            <input type="file" name="repo_file" class="tatc-input" accept=".pdf,.ppt,.pptx,.doc,.docx,.zip,.png,.jpg,.jpeg">
+                                        </div>
+                                    </div>
+                                    <div class="tatc-form-grid mb-3">
+                                        <div style="grid-column: span 2;">
+                                            <label class="tatc-label">Instruksi / Deskripsi Penugasan *</label>
+                                            <input type="text" name="description" class="tatc-input" placeholder="Contoh: Kerjakan analisis sesuai gambar terlampir dan kumpulkan laporan PDF sebelum batas waktu deadline." required>
+                                        </div>
+                                        <div>
+                                            <label class="tatc-label">Passing Grade Assignment</label>
+                                            <input type="number" name="passing_grade" class="tatc-input" value="75" min="50" max="100">
+                                        </div>
+                                    </div>
+                                    <div class="d-flex justify-content-end gap-2">
+                                        <button type="button" class="tatc-btn-outline" style="padding:6px 12px; font-size:12px;" onclick="document.getElementById('addAsgDrawer_<?php echo $cid; ?>').style.display='none';">Batal</button>
+                                        <button type="submit" class="tatc-btn-red" style="padding:6px 14px; font-size:12.5px; background:#6d28d9;">Simpan Assignment ke <?php echo s($ch->chapter_no); ?></button>
                                     </div>
                                 </form>
                             </div>
@@ -890,12 +1037,12 @@ echo amto_render_shared_styles();
                             </div>
                         <?php endif; ?>
 
-                        <!-- ISI BAB: DAFTAR MATERI & UJIAN DI DALAM BAB INI -->
-                        <?php if (empty($ch_materials) && empty($ch_exams)): ?>
+                        <!-- ISI BAB: DAFTAR MATERI, QUIZ/UJIAN, & ASSIGNMENT DI DALAM BAB INI -->
+                        <?php if (empty($ch_materials) && empty($ch_exams) && empty($ch_assignments)): ?>
                             <div style="text-align:center; padding: 18px 14px; border: 1px dashed #cbd5e1; border-radius: 10px; color: #64748b; font-size: 13px;">
-                                Belum ada materi atau ujian di dalam <strong><?php echo s($ch->chapter_no); ?></strong>.
+                                Belum ada materi, quiz/ujian, atau assignment di dalam <strong><?php echo s($ch->chapter_no); ?></strong>.
                                 <?php if ($can_manage): ?>
-                                    Klik tombol <strong>"+ Tambah Materi"</strong> atau <strong>"+ Buat Ujian"</strong> di pojok kanan atas <?php echo s($ch->chapter_no); ?> untuk menambahkan konten.
+                                    Klik tombol <strong>"+ Tambah Materi"</strong>, <strong>"+ Buat Quiz / Ujian"</strong>, atau <strong>"+ Buat Assignment"</strong> di pojok kanan atas <?php echo s($ch->chapter_no); ?> untuk menambahkan konten.
                                 <?php endif; ?>
                             </div>
                         <?php else: ?>
@@ -976,15 +1123,19 @@ echo amto_render_shared_styles();
                                 <?php endif; ?>
                             <?php endforeach; ?>
 
-                            <!-- ITEM UJIAN / ASSESSMENT DI DALAM BAB INI -->
+                            <!-- ITEM QUIZ / UJIAN DI DALAM BAB INI -->
                             <?php foreach ($ch_exams as $cex): ?>
+                                <?php
+                                $q_count = $DB->count_records('amto_exam_questions', ['exam_id' => $cex->id]);
+                                ?>
                                 <div class="celoe-item-row" style="background:#fffdf5; border-color:#fde68a;">
                                     <div>
                                         <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
-                                            <span class="tatc-doc-pill" style="margin:0; background:#fef3c7; color:#b45309; font-weight:800;">UJIAN / ASSESSMENT</span>
+                                            <span class="tatc-doc-pill" style="margin:0; background:#fef3c7; color:#b45309; font-weight:800;">QUIZ / UJIAN</span>
                                             <span class="tatc-doc-pill" style="margin:0; font-weight:700;"><?php echo s($cex->exam_code); ?></span>
                                             <strong style="font-size: 14px; color: #0f172a;"><?php echo s($cex->title); ?></strong>
                                             <span class="tatc-doc-pill" style="margin:0;"><?php echo s($cex->exam_type); ?></span>
+                                            <span class="tatc-doc-pill" style="margin:0; background:#e0f2fe; color:#0369a1; font-weight:700;"><?php echo $q_count; ?> Butir Soal</span>
                                         </div>
                                         <div style="font-size: 12px; color: #64748b;">
                                             Passing Grade: <strong><?php echo (int)$cex->passing_grade; ?>/100</strong> &bull;
@@ -996,11 +1147,14 @@ echo amto_render_shared_styles();
 
                                     <?php if ($can_manage): ?>
                                         <div class="d-flex flex-wrap gap-1 align-items-center">
+                                            <a href="/amto/ujian_logbook.php?tab=ujian&amp;manage_questions=<?php echo (int)$cex->id; ?>" class="tatc-btn-red" style="padding: 6px 12px; font-size: 12px;">
+                                                + Kelola Soal &amp; Gambar (<?php echo $q_count; ?>)
+                                            </a>
                                             <a href="/amto/ujian_logbook.php?tab=hasil" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px;">
                                                 Cek Nilai
                                             </a>
                                             <a href="/amto/ujian_logbook.php?tab=ujian&amp;edit_exam=<?php echo (int)$cex->id; ?>" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px; color:#1d4ed8 !important; border-color:#bfdbfe; background:#eff6ff;">
-                                                Edit Ujian
+                                                Edit Quiz
                                             </a>
                                             <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>" style="display:inline;" onsubmit="return confirm('Hapus ujian ini dari <?php echo s($ch->chapter_no); ?>?');">
                                                 <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
@@ -1014,10 +1168,103 @@ echo amto_render_shared_styles();
                                         </div>
                                     <?php else: ?>
                                         <a href="/amto/ujian_logbook.php?tab=ujian&amp;take_exam=<?php echo (int)$cex->id; ?>" class="tatc-btn-red" style="padding: 7px 14px; font-size: 12.5px;">
-                                            Kerjakan Ujian CBT &rarr;
+                                            Kerjakan Quiz / Ujian &rarr;
                                         </a>
                                     <?php endif; ?>
                                 </div>
+                            <?php endforeach; ?>
+
+                            <!-- ITEM ASSIGNMENT / PENUGASAN LENGKAP DENGAN DEADLINE DI DALAM BAB INI -->
+                            <?php foreach ($ch_assignments as $asg): ?>
+                                <?php
+                                $dl_ts = strtotime($asg->deadline_at);
+                                $is_expired = ($dl_ts && time() > $dl_ts);
+                                $sub_count = $DB->count_records('amto_assignment_submissions', ['assignment_id' => $asg->id]);
+                                ?>
+                                <div class="celoe-item-row" style="background:#faf5ff; border-color:#ddd6fe;">
+                                    <div style="max-width: 680px;">
+                                        <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                                            <span class="tatc-doc-pill" style="margin:0; background:#ede9fe; color:#6d28d9; font-weight:800;">ASSIGNMENT / PENUGASAN</span>
+                                            <strong style="font-size: 14px; color: #0f172a;"><?php echo s($asg->title); ?></strong>
+                                            <span class="tatc-doc-pill" style="margin:0; <?php echo $is_expired ? 'background:#fee2e2; color:#b91c1c;' : 'background:#dcfce7; color:#15803d;'; ?> font-weight:700;">
+                                                Deadline: <?php echo s($asg->deadline_at); ?> WIB <?php echo $is_expired ? '(Melewati Deadline)' : '(Masih Dibuka)'; ?>
+                                            </span>
+                                        </div>
+                                        <?php if (!empty($asg->description)): ?>
+                                            <div style="font-size: 12.5px; color: #475569; margin-top: 3px;">
+                                                <?php echo s($asg->description); ?>
+                                            </div>
+                                        <?php endif; ?>
+                                        <div style="font-size: 11.5px; color: #64748b; margin-top: 4px;">
+                                            Passing Grade: <strong><?php echo (int)$asg->passing_grade; ?>/100</strong> &bull;
+                                            Dibuat oleh: <strong><?php echo s($asg->created_by); ?></strong> &bull;
+                                            Terkumpul: <strong><?php echo $sub_count; ?> Peserta</strong>
+                                        </div>
+                                    </div>
+
+                                    <div class="d-flex flex-wrap gap-1 align-items-center">
+                                        <?php if (!empty($asg->attachment_path)): ?>
+                                            <a href="/amto/download.php?type=assign&amp;id=<?php echo (int)$asg->id; ?>" target="_blank" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px;">
+                                                Unduh Lampiran Soal
+                                            </a>
+                                        <?php endif; ?>
+
+                                        <?php if ($can_manage): ?>
+                                            <a href="/amto/ujian_logbook.php?tab=assignment&amp;view_assign=<?php echo (int)$asg->id; ?>" class="tatc-btn-red" style="padding: 6px 12px; font-size: 12px; background:#6d28d9;">
+                                                Cek Pengumpulan (<?php echo $sub_count; ?>)
+                                            </a>
+                                            <button type="button" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px; color:#1d4ed8 !important; border-color:#bfdbfe; background:#eff6ff;" onclick="var ea=document.getElementById('editAsg_<?php echo (int)$asg->id; ?>'); ea.style.display=(ea.style.display==='none'?'block':'none');">
+                                                Edit Deadline
+                                            </button>
+                                            <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>" style="display:inline;" onsubmit="return confirm('Hapus assignment ini dari <?php echo s($ch->chapter_no); ?>?');">
+                                                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                                <input type="hidden" name="action" value="delete_assignment">
+                                                <input type="hidden" name="assign_id" value="<?php echo (int)$asg->id; ?>">
+                                                <input type="hidden" name="target_class_id" value="<?php echo (int)$selected_class->id; ?>">
+                                                <button type="submit" class="tatc-btn-outline" style="padding: 6px 10px; font-size: 12px; color:#b91c1c !important; border-color:#fecaca; background:#fef2f2;">
+                                                    Hapus
+                                                </button>
+                                            </form>
+                                        <?php else: ?>
+                                            <a href="/amto/ujian_logbook.php?tab=assignment&amp;submit_assign=<?php echo (int)$asg->id; ?>" class="tatc-btn-red" style="padding: 7px 14px; font-size: 12.5px; background:#6d28d9;">
+                                                Kerjakan &amp; Kumpulkan Tugas &rarr;
+                                            </a>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+
+                                <?php if ($can_manage): ?>
+                                    <div id="editAsg_<?php echo (int)$asg->id; ?>" class="celoe-inline-drawer" style="display:none; background:#f5f3ff; border-color:#ddd6fe;">
+                                        <form method="post" action="/amto/repository.php?class_id=<?php echo (int)$selected_class->id; ?>" enctype="multipart/form-data">
+                                            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                            <input type="hidden" name="action" value="edit_assignment">
+                                            <input type="hidden" name="assign_id" value="<?php echo (int)$asg->id; ?>">
+                                            <input type="hidden" name="target_class_id" value="<?php echo (int)$selected_class->id; ?>">
+                                            <div class="tatc-form-grid mb-2">
+                                                <div>
+                                                    <label class="tatc-label">Judul Assignment *</label>
+                                                    <input type="text" name="title" class="tatc-input" value="<?php echo s($asg->title); ?>" required>
+                                                </div>
+                                                <div>
+                                                    <label class="tatc-label">Setting Deadline (Tanggal &amp; Jam) *</label>
+                                                    <input type="datetime-local" name="deadline_at" class="tatc-input" value="<?php echo s(str_replace(' ', 'T', substr($asg->deadline_at, 0, 16))); ?>" required>
+                                                </div>
+                                                <div>
+                                                    <label class="tatc-label">Ganti Lampiran File/Gambar (Opsional)</label>
+                                                    <input type="file" name="repo_file" class="tatc-input">
+                                                </div>
+                                            </div>
+                                            <div class="mb-2">
+                                                <label class="tatc-label">Instruksi Penugasan</label>
+                                                <input type="text" name="description" class="tatc-input" value="<?php echo s((string)$asg->description); ?>">
+                                            </div>
+                                            <div class="d-flex justify-content-end gap-2">
+                                                <button type="button" class="tatc-btn-outline" style="padding:5px 10px; font-size:12px;" onclick="document.getElementById('editAsg_<?php echo (int)$asg->id; ?>').style.display='none';">Batal</button>
+                                                <button type="submit" class="tatc-btn-red" style="padding:5px 12px; font-size:12px; background:#6d28d9;">Simpan Perubahan &amp; Deadline</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                <?php endif; ?>
                             <?php endforeach; ?>
                         <?php endif; ?>
                     </div>

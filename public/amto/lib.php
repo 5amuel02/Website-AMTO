@@ -257,6 +257,78 @@ function amto_ensure_tables(): void {
         $DB->execute($sql);
     }
 
+    // 7b. Table: amto_exam_questions (Bank Soal Quiz Pilihan Ganda & Essay + Lampiran Gambar)
+    if (!$dbman->table_exists('amto_exam_questions')) {
+        $sql = "CREATE TABLE {amto_exam_questions} (
+            id BIGINT(10) NOT NULL AUTO_INCREMENT,
+            exam_id BIGINT(10) NOT NULL DEFAULT 0,
+            question_type VARCHAR(30) NOT NULL DEFAULT 'mcq',
+            question_text TEXT NOT NULL,
+            image_path VARCHAR(255) NOT NULL DEFAULT '',
+            option_a TEXT DEFAULT NULL,
+            option_b TEXT DEFAULT NULL,
+            option_c TEXT DEFAULT NULL,
+            option_d TEXT DEFAULT NULL,
+            correct_answer TEXT DEFAULT NULL,
+            points INT(10) NOT NULL DEFAULT 20,
+            sort_order INT(10) NOT NULL DEFAULT 1,
+            timecreated BIGINT(10) NOT NULL DEFAULT 0,
+            PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        $DB->execute($sql);
+    }
+
+    $er_cols = $DB->get_columns('amto_exam_results', false);
+    if (!isset($er_cols['answers_json'])) {
+        try {
+            $DB->execute("ALTER TABLE {amto_exam_results} ADD COLUMN IF NOT EXISTS answers_json LONGTEXT DEFAULT NULL AFTER notes");
+        } catch (Throwable $e) {
+        }
+    }
+
+    // 7c. Table: amto_assignments (Penugasan / Assignment Kelas Lengkap dengan Deadline)
+    if (!$dbman->table_exists('amto_assignments')) {
+        $sql = "CREATE TABLE {amto_assignments} (
+            id BIGINT(10) NOT NULL AUTO_INCREMENT,
+            schedule_id BIGINT(10) NOT NULL DEFAULT 0,
+            batch_code VARCHAR(80) NOT NULL,
+            chapter_id BIGINT(10) NOT NULL DEFAULT 0,
+            chapter_no VARCHAR(50) NOT NULL DEFAULT 'Bab 1',
+            title VARCHAR(255) NOT NULL,
+            description TEXT DEFAULT NULL,
+            attachment_path VARCHAR(255) NOT NULL DEFAULT '',
+            deadline_at VARCHAR(40) NOT NULL,
+            passing_grade INT(10) NOT NULL DEFAULT 75,
+            created_by VARCHAR(150) NOT NULL DEFAULT 'Admin TATC',
+            status VARCHAR(30) NOT NULL DEFAULT 'Active',
+            timecreated BIGINT(10) NOT NULL DEFAULT 0,
+            PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        $DB->execute($sql);
+    }
+
+    // 7d. Table: amto_assignment_submissions (Pengumpulan Tugas Peserta & Nilai Assignment)
+    if (!$dbman->table_exists('amto_assignment_submissions')) {
+        $sql = "CREATE TABLE {amto_assignment_submissions} (
+            id BIGINT(10) NOT NULL AUTO_INCREMENT,
+            assignment_id BIGINT(10) NOT NULL DEFAULT 0,
+            userid BIGINT(10) NOT NULL DEFAULT 0,
+            username VARCHAR(100) NOT NULL,
+            fullname VARCHAR(200) NOT NULL,
+            answer_text TEXT DEFAULT NULL,
+            file_path VARCHAR(255) NOT NULL DEFAULT '',
+            is_late INT(2) NOT NULL DEFAULT 0,
+            score INT(10) DEFAULT NULL,
+            feedback TEXT DEFAULT NULL,
+            graded_by VARCHAR(150) DEFAULT '',
+            status VARCHAR(40) NOT NULL DEFAULT 'Submitted',
+            timecreated BIGINT(10) NOT NULL DEFAULT 0,
+            timemodified BIGINT(10) NOT NULL DEFAULT 0,
+            PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        $DB->execute($sql);
+    }
+
     // 8. Table: amto_certificates (E-Sertifikat & Certificate of Recognition CASR Part 147 No. 147D-19)
     if (!$dbman->table_exists('amto_certificates')) {
         $sql = "CREATE TABLE {amto_certificates} (
