@@ -152,12 +152,15 @@ $test_accounts = [
         'courserole'=> 'editingteacher',
     ],
     [
-        'username'  => 'certofficer',
-        'email'     => 'cert@tatc.id',
-        'firstname' => 'Iman',
-        'lastname'  => 'Setiawan',
-        'role'      => 'r05_certofficer',
-        'courserole'=> 'teacher',
+        'username'      => 'ImanJM',
+        'old_usernames' => ['certofficer', 'imanjm'],
+        'email'         => 'imanjanuar44@gmail.com',
+        'old_emails'    => ['cert@tatc.id'],
+        'password'      => 'Imanjanuar12345',
+        'firstname'     => 'Iman',
+        'lastname'      => 'Januar M',
+        'role'          => 'r05_certofficer',
+        'courserole'    => 'teacher',
     ],
     [
         'username'  => 'qa',
@@ -189,7 +192,32 @@ $courses = $DB->get_records_select('course', 'id > 1');
 $enrol_manual = enrol_get_plugin('manual');
 
 foreach ($test_accounts as $acc) {
-    $u = $DB->get_record('user', ['username' => $acc['username'], 'mnethostid' => $CFG->mnet_localhost_id]);
+    $acc_pass = $acc['password'] ?? $default_pass;
+    $acc_pass_hash = hash_internal_user_password($acc_pass);
+    // Moodle mewajibkan kolom mdl_user.username disimpan lowercase; form login otomatis mengubah input 'ImanJM' -> 'imanjm'
+    $moodle_uname = strtolower(trim($acc['username']));
+
+    $u = $DB->get_record('user', ['username' => $moodle_uname, 'mnethostid' => $CFG->mnet_localhost_id]);
+    if (!$u) {
+        $u = $DB->get_record('user', ['username' => $acc['username'], 'mnethostid' => $CFG->mnet_localhost_id]);
+    }
+    if (!$u && !empty($acc['old_usernames'])) {
+        foreach ($acc['old_usernames'] as $old_uname) {
+            $u = $DB->get_record('user', ['username' => strtolower($old_uname), 'mnethostid' => $CFG->mnet_localhost_id]);
+            if ($u) {
+                break;
+            }
+        }
+    }
+    if (!$u && !empty($acc['old_emails'])) {
+        foreach ($acc['old_emails'] as $old_email) {
+            $u = $DB->get_record('user', ['email' => $old_email, 'mnethostid' => $CFG->mnet_localhost_id]);
+            if ($u) {
+                break;
+            }
+        }
+    }
+
     if (!$u) {
         $u = new stdClass();
         $u->auth         = 'manual';
@@ -198,8 +226,8 @@ foreach ($test_accounts as $acc) {
         $u->deleted      = 0;
         $u->suspended    = 0;
         $u->mnethostid   = $CFG->mnet_localhost_id;
-        $u->username     = $acc['username'];
-        $u->password     = $pass_hash;
+        $u->username     = $moodle_uname;
+        $u->password     = $acc_pass_hash;
         $u->firstname    = $acc['firstname'];
         $u->lastname     = $acc['lastname'];
         $u->email        = $acc['email'];
@@ -209,19 +237,20 @@ foreach ($test_accounts as $acc) {
         $u->timecreated  = time();
         $u->timemodified = time();
         $u->id = $DB->insert_record('user', $u);
-        echo " [+] Created User: {$acc['username']} ({$acc['email']}) -> ID {$u->id}\n";
+        echo " [+] Created User: {$acc['username']} (login: {$moodle_uname} / {$acc['email']}) -> ID {$u->id}\n";
     } else {
         $u->auth         = 'manual';
         $u->confirmed    = 1;
         $u->deleted      = 0;
         $u->suspended    = 0;
-        $u->password     = $pass_hash;
+        $u->username     = $moodle_uname;
+        $u->password     = $acc_pass_hash;
         $u->email        = $acc['email'];
         $u->firstname    = $acc['firstname'];
         $u->lastname     = $acc['lastname'];
         $u->timemodified = time();
         $DB->update_record('user', $u);
-        echo " [=] Updated User & Reset Password: {$acc['username']} ({$acc['email']}) -> ID {$u->id}\n";
+        echo " [=] Updated User & Reset Password: {$acc['username']} (login: {$moodle_uname} / {$acc['email']}) -> ID {$u->id}\n";
     }
 
     // Clear any lockout or forcepasswordchange flags so login works immediately
@@ -258,12 +287,12 @@ foreach ($test_accounts as $acc) {
     // Verify authenticate_user_login works
     $reason = null;
     $errorcode = null;
-    $auth_ok = authenticate_user_login($acc['username'], $default_pass, false, $errorcode);
-    echo "     -> Auth Check ({$acc['username']} / {$default_pass}): " . ($auth_ok ? "OK (UID {$auth_ok->id})" : "FAILED (code {$errorcode})") . "\n";
+    $auth_ok = authenticate_user_login($acc['username'], $acc_pass, false, $errorcode);
+    echo "     -> Auth Check ({$acc['username']} / {$acc_pass}): " . ($auth_ok ? "OK (UID {$auth_ok->id})" : "FAILED (code {$errorcode})") . "\n";
 
     // Also ensure the account exists in tatc_web.users (Portal React) with matching bcryptjs ($2a$10$) password hash
     try {
-        $tatc_bcrypt_hash = str_replace('$2y$', '$2a$', password_hash($default_pass, PASSWORD_BCRYPT));
+        $tatc_bcrypt_hash = str_replace('$2y$', '$2a$', password_hash($acc_pass, PASSWORD_BCRYPT));
         $tatc_role = 'ADMIN';
         if ($acc['role'] === 'r01_trainee') {
             $tatc_role = 'PESERTA';
@@ -273,6 +302,18 @@ foreach ($test_accounts as $acc) {
             $tatc_role = 'SUPERADMIN';
         }
         $full_name = trim($acc['firstname'] . ' ' . $acc['lastname']);
+        if (!empty($acc['old_emails'])) {
+            foreach ($acc['old_emails'] as $old_email) {
+                try {
+                    $DB->execute(
+                        "UPDATE IGNORE tatc_web.users SET email = ? WHERE email = ?",
+                        [$acc['email'], $old_email]
+                    );
+                } catch (Throwable $e) {
+                    // Ignore if old email not present
+                }
+            }
+        }
         $DB->execute(
             "INSERT INTO tatc_web.users (email, password_hash, role, status, email_verified_at, created_at, updated_at)
              VALUES (?, ?, ?, 'ACTIVE', NOW(), NOW(), NOW())

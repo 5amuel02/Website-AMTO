@@ -737,26 +737,34 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
     }
 
     if (!$target_user) {
-        // Look up non-admin user by email first
+        // Look up non-admin user by email or mapped official username first
         $candidates = $DB->get_records_select(
             'user',
-            'LOWER(email) = :e AND deleted = 0 AND mnethostid = :m AND username <> \'admin\'',
-            ['e' => $email, 'm' => $CFG->mnet_localhost_id],
+            '(LOWER(email) = :e OR (:e2 = \'imanjanuar44@gmail.com\' AND username IN (\'imanjm\', \'certofficer\'))) AND deleted = 0 AND mnethostid = :m AND username <> \'admin\'',
+            ['e' => $email, 'e2' => $email, 'm' => $CFG->mnet_localhost_id],
             'id ASC'
         );
         if (!empty($candidates)) {
             $target_user = reset($candidates);
+            if ($email === 'imanjanuar44@gmail.com' && ($target_user->username !== 'imanjm' || strtolower($target_user->email) !== 'imanjanuar44@gmail.com')) {
+                $target_user->username  = 'imanjm';
+                $target_user->email     = 'imanjanuar44@gmail.com';
+                $target_user->firstname = 'Iman';
+                $target_user->lastname  = 'Januar M';
+                $DB->update_record('user', $target_user);
+            }
         }
     }
 
     $email_role_map = [
-        'peserta@tatc.id'    => 'r01_trainee',
-        'instruktur@tatc.id' => 'r02_instructor',
-        'assessor@tatc.id'   => 'r03_assessor',
-        'tm@tatc.id'         => 'r04_trainingmanager',
-        'cert@tatc.id'       => 'r05_certofficer',
-        'qa@tatc.id'         => 'r06_qa',
-        'manajemen@tatc.id'  => 'r08_management',
+        'peserta@tatc.id'        => 'r01_trainee',
+        'instruktur@tatc.id'     => 'r02_instructor',
+        'assessor@tatc.id'       => 'r03_assessor',
+        'tm@tatc.id'             => 'r04_trainingmanager',
+        'imanjanuar44@gmail.com' => 'r05_certofficer',
+        'cert@tatc.id'           => 'r05_certofficer',
+        'qa@tatc.id'             => 'r06_qa',
+        'manajemen@tatc.id'      => 'r08_management',
     ];
 
     if (!$target_user) {
@@ -796,15 +804,20 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         $firstname = $parts[0] ?? $display;
         $lastname = (!empty($parts[1])) ? $parts[1] : 'TATC';
 
-        $official_test_emails = [
-            'peserta@tatc.id', 'instruktur@tatc.id', 'assessor@tatc.id',
-            'tm@tatc.id', 'cert@tatc.id', 'qa@tatc.id',
-            'admin@tatc.id', 'manajemen@tatc.id',
+        $official_test_passwords = [
+            'peserta@tatc.id'        => 'Admin123@2',
+            'instruktur@tatc.id'     => 'Admin123@2',
+            'assessor@tatc.id'       => 'Admin123@2',
+            'tm@tatc.id'             => 'Admin123@2',
+            'imanjanuar44@gmail.com' => 'Imanjanuar12345',
+            'cert@tatc.id'           => 'Imanjanuar12345',
+            'qa@tatc.id'             => 'Admin123@2',
+            'admin@tatc.id'          => 'Admin123@2',
+            'manajemen@tatc.id'      => 'Admin123@2',
         ];
         // [SEC-SSO-03] IAM-03: Gunakan password kriptografis acak untuk akun SSO baru di luar 8 akun uji resmi
-        $initial_plain_pass = in_array($email, $official_test_emails, true)
-            ? 'Admin123@2'
-            : (bin2hex(random_bytes(12)) . 'A1@');
+        $initial_plain_pass = $official_test_passwords[$email]
+            ?? (bin2hex(random_bytes(12)) . 'A1@');
 
         $nu = new stdClass();
         $nu->auth = 'manual';

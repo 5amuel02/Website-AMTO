@@ -47,7 +47,7 @@ function resolveAmtoRole(subject) {
   if (email === 'qa@tatc.id' || ['QA', 'R06_QA'].includes(rawRole)) return 'R06_QA';
   if (['manajemen@tatc.id', 'management@tatc.id'].includes(email) || ['MANAGEMENT', 'MANAJEMEN', 'R08_MANAGEMENT'].includes(rawRole)) return 'R08_MANAGEMENT';
   if (email === 'tm@tatc.id' || ['TRAININGMANAGER', 'R04_TM'].includes(rawRole)) return 'R04_TM';
-  if (email === 'cert@tatc.id' || ['CERTOFFICER', 'R05_CERT'].includes(rawRole)) return 'R05_CERT';
+  if (['imanjanuar44@gmail.com', 'cert@tatc.id'].includes(email) || ['CERTOFFICER', 'R05_CERT'].includes(rawRole)) return 'R05_CERT';
   if (email === 'assessor@tatc.id' || ['ASSESSOR', 'R03_ASSESSOR'].includes(rawRole)) return 'R03_ASSESSOR';
   if (email === 'admin@tatc.id' || ['SUPERADMIN', 'SUPER_ADMIN', 'R07_ADMIN_IT'].includes(rawRole)) return 'R07_ADMIN_IT';
   if (normalizeRole(rawRole) === 'ADMIN') return 'R04_TM';
@@ -86,17 +86,51 @@ function hasStrongPassword(password) {
     && /[^A-Za-z0-9\s]/.test(password);
 }
 
-async function findUserByEmail(email) {
+const USERNAME_TO_EMAIL_MAP = {
+  peserta: 'peserta@tatc.id',
+  instruktur: 'instruktur@tatc.id',
+  assessor: 'assessor@tatc.id',
+  trainingmanager: 'tm@tatc.id',
+  tm: 'tm@tatc.id',
+  imanjm: 'imanjanuar44@gmail.com',
+  certofficer: 'imanjanuar44@gmail.com',
+  'cert@tatc.id': 'imanjanuar44@gmail.com',
+  qa: 'qa@tatc.id',
+  admin: 'admin@tatc.id',
+  management: 'manajemen@tatc.id',
+  manajemen: 'manajemen@tatc.id',
+};
+
+async function findUserByEmail(emailOrUsername) {
   const pool = connection();
+  const raw = String(emailOrUsername || '').trim().toLowerCase();
+  const email = USERNAME_TO_EMAIL_MAP[raw] || raw;
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ? LIMIT 1', [email]);
+    let [rows] = await pool.query('SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1', [email]);
+    if (!rows[0] && email === 'imanjanuar44@gmail.com') {
+      // Auto-migrate R05 account from legacy cert@tatc.id or provision if missing
+      const hash = await bcrypt.hash('Imanjanuar12345', 10);
+      await pool.query(
+        `UPDATE users SET email = ?, password_hash = ?, role = 'ADMIN', status = 'ACTIVE' WHERE LOWER(email) = 'cert@tatc.id'`,
+        [email, hash]
+      ).catch(() => {});
+      [rows] = await pool.query('SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1', [email]);
+      if (!rows[0]) {
+        await pool.query(
+          `INSERT INTO users (email, password_hash, role, status, email_verified_at, created_at, updated_at)
+           VALUES (?, ?, 'ADMIN', 'ACTIVE', NOW(), NOW(), NOW())`,
+          [email, hash]
+        ).catch(() => {});
+        [rows] = await pool.query('SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1', [email]);
+      }
+    }
     if (!rows[0]) return null;
     return rows[0];
   } catch {
     try {
       const [rows] = await pool.query(`SELECT u.*, GROUP_CONCAT(r.code ORDER BY r.code SEPARATOR ',') AS resolved_role
         FROM users u LEFT JOIN user_roles ur ON ur.user_id=u.id LEFT JOIN roles r ON r.id=ur.role_id
-        WHERE u.email=? GROUP BY u.id LIMIT 1`, [email]);
+        WHERE LOWER(u.email)=? GROUP BY u.id LIMIT 1`, [email]);
       return rows[0] || null;
     } catch {
       return null;
