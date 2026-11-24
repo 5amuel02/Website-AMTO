@@ -44,7 +44,7 @@ function resolveAmtoRole(subject) {
   const email = String(subject.email || '').trim().toLowerCase();
   const rawRole = String(subject.amto_role || subject.resolved_role?.split(',')[0] || subject.role || '').trim().toUpperCase();
 
-  if (email === 'qa@tatc.id' || ['QA', 'R06_QA'].includes(rawRole)) return 'R06_QA';
+  if (['qa@tatc.id', 'umismd@gmail.com', 'asfriyantot@gmail.com', 'indset69@gmail.com'].includes(email) || ['QA', 'R06_QA'].includes(rawRole)) return 'R06_QA';
   if (['manajemen@tatc.id', 'management@tatc.id'].includes(email) || ['MANAGEMENT', 'MANAJEMEN', 'R08_MANAGEMENT'].includes(rawRole)) return 'R08_MANAGEMENT';
   if (email === 'tm@tatc.id' || ['TRAININGMANAGER', 'R04_TM'].includes(rawRole)) return 'R04_TM';
   if (['imanjanuar44@gmail.com', 'cert@tatc.id'].includes(email) || ['CERTOFFICER', 'R05_CERT'].includes(rawRole)) return 'R05_CERT';
@@ -96,9 +96,19 @@ const USERNAME_TO_EMAIL_MAP = {
   certofficer: 'imanjanuar44@gmail.com',
   'cert@tatc.id': 'imanjanuar44@gmail.com',
   qa: 'qa@tatc.id',
+  umi: 'umismd@gmail.com',
+  teguh: 'asfriyantot@gmail.com',
+  indra: 'indset69@gmail.com',
   admin: 'admin@tatc.id',
   management: 'manajemen@tatc.id',
   manajemen: 'manajemen@tatc.id',
+};
+
+const OFFICIAL_TATC_AUTO_PROVISION = {
+  'imanjanuar44@gmail.com': { pass: 'Imanjanuar12345', role: 'ADMIN', oldEmail: 'cert@tatc.id' },
+  'umismd@gmail.com': { pass: 'Umi12345', role: 'ADMIN' },
+  'asfriyantot@gmail.com': { pass: 'Teguhasfriyanto12345', role: 'ADMIN' },
+  'indset69@gmail.com': { pass: 'Idra12345', role: 'ADMIN' },
 };
 
 async function findUserByEmail(emailOrUsername) {
@@ -107,19 +117,21 @@ async function findUserByEmail(emailOrUsername) {
   const email = USERNAME_TO_EMAIL_MAP[raw] || raw;
   try {
     let [rows] = await pool.query('SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1', [email]);
-    if (!rows[0] && email === 'imanjanuar44@gmail.com') {
-      // Auto-migrate R05 account from legacy cert@tatc.id or provision if missing
-      const hash = await bcrypt.hash('Imanjanuar12345', 10);
-      await pool.query(
-        `UPDATE users SET email = ?, password_hash = ?, role = 'ADMIN', status = 'ACTIVE' WHERE LOWER(email) = 'cert@tatc.id'`,
-        [email, hash]
-      ).catch(() => {});
-      [rows] = await pool.query('SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1', [email]);
+    if (!rows[0] && OFFICIAL_TATC_AUTO_PROVISION[email]) {
+      const cfg = OFFICIAL_TATC_AUTO_PROVISION[email];
+      const hash = await bcrypt.hash(cfg.pass, 10);
+      if (cfg.oldEmail) {
+        await pool.query(
+          `UPDATE users SET email = ?, password_hash = ?, role = ?, status = 'ACTIVE' WHERE LOWER(email) = ?`,
+          [email, hash, cfg.role, cfg.oldEmail]
+        ).catch(() => {});
+        [rows] = await pool.query('SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1', [email]);
+      }
       if (!rows[0]) {
         await pool.query(
           `INSERT INTO users (email, password_hash, role, status, email_verified_at, created_at, updated_at)
-           VALUES (?, ?, 'ADMIN', 'ACTIVE', NOW(), NOW(), NOW())`,
-          [email, hash]
+           VALUES (?, ?, ?, 'ACTIVE', NOW(), NOW(), NOW())`,
+          [email, hash, cfg.role]
         ).catch(() => {});
         [rows] = await pool.query('SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1', [email]);
       }

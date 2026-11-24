@@ -836,6 +836,9 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         'imanjanuar44@gmail.com' => 'r05_certofficer',
         'cert@tatc.id'           => 'r05_certofficer',
         'qa@tatc.id'             => 'r06_qa',
+        'umismd@gmail.com'       => 'r06_qa',
+        'asfriyantot@gmail.com'  => 'r06_qa',
+        'indset69@gmail.com'     => 'r06_qa',
         'manajemen@tatc.id'      => 'r08_management',
     ];
 
@@ -884,6 +887,9 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
             'imanjanuar44@gmail.com' => 'Imanjanuar12345',
             'cert@tatc.id'           => 'Imanjanuar12345',
             'qa@tatc.id'             => 'Admin123@2',
+            'umismd@gmail.com'       => 'Umi12345',
+            'asfriyantot@gmail.com'  => 'Teguhasfriyanto12345',
+            'indset69@gmail.com'     => 'Idra12345',
             'admin@tatc.id'          => 'Admin123@2',
             'manajemen@tatc.id'      => 'Admin123@2',
         ];

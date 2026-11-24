@@ -8,6 +8,13 @@ export const TABLES = {
 
 export const ADMIN_ROLES = ['SUPERADMIN', 'ADMIN', 'QA', 'MANAGEMENT'];
 export const READ_ONLY_ADMIN_ROLES = ['QA', 'R06_QA', 'MANAGEMENT', 'MANAJEMEN', 'R08_MANAGEMENT'];
-export const READ_ONLY_ADMIN_EMAILS = ['qa@tatc.id', 'manajemen@tatc.id', 'management@tatc.id'];
+export const READ_ONLY_ADMIN_EMAILS = [
+  'qa@tatc.id',
+  'umismd@gmail.com',
+  'asfriyantot@gmail.com',
+  'indset69@gmail.com',
+  'manajemen@tatc.id',
+  'management@tatc.id',
+];
 export const ROLE_ORDER = ['SUPERADMIN', 'ADMIN', 'QA', 'MANAGEMENT', 'INSTRUKTUR', 'PESERTA'];
 

@@ -133,37 +133,116 @@ if ($frm && isset($frm->username)) {
     // Login WITH cookies.
     $frm->username = trim(core_text::strtolower($frm->username));
 
-    // Auto-sync official R05 Certification Officer account (ImanJM / imanjanuar44@gmail.com) so login works immediately after git pull
-    if (in_array($frm->username, ['imanjm', 'imanjanuar44@gmail.com', 'certofficer', 'cert@tatc.id'], true)) {
-        $r05_user = $DB->get_record('user', ['username' => 'imanjm', 'mnethostid' => $CFG->mnet_localhost_id]);
-        if (!$r05_user) {
-            $r05_user = $DB->get_record('user', ['username' => 'certofficer', 'mnethostid' => $CFG->mnet_localhost_id]);
+    // Auto-sync official Struktur Organisasi TATC accounts so login works immediately after git pull
+    $org_accounts_sync = [
+        [
+            'triggers'    => ['imanjm', 'imanjanuar44@gmail.com', 'certofficer', 'cert@tatc.id'],
+            'username'    => 'imanjm',
+            'old_unames'  => ['certofficer'],
+            'email'       => 'imanjanuar44@gmail.com',
+            'old_emails'  => ['cert@tatc.id'],
+            'firstname'   => 'Iman',
+            'lastname'    => 'Januar M',
+            'password'    => 'Imanjanuar12345',
+            'role'        => 'r05_certofficer',
+        ],
+        [
+            'triggers'    => ['umi', 'umismd@gmail.com'],
+            'username'    => 'umi',
+            'old_unames'  => [],
+            'email'       => 'umismd@gmail.com',
+            'old_emails'  => [],
+            'firstname'   => 'Rita',
+            'lastname'    => 'Sri Mutiari D',
+            'password'    => 'Umi12345',
+            'role'        => 'r06_qa',
+        ],
+        [
+            'triggers'    => ['teguh', 'asfriyantot@gmail.com'],
+            'username'    => 'teguh',
+            'old_unames'  => [],
+            'email'       => 'asfriyantot@gmail.com',
+            'old_emails'  => [],
+            'firstname'   => 'Teguh',
+            'lastname'    => 'Asfriyanto',
+            'password'    => 'Teguhasfriyanto12345',
+            'role'        => 'r06_qa',
+        ],
+        [
+            'triggers'    => ['indra', 'indset69@gmail.com'],
+            'username'    => 'indra',
+            'old_unames'  => [],
+            'email'       => 'indset69@gmail.com',
+            'old_emails'  => [],
+            'firstname'   => 'Indra',
+            'lastname'    => 'Setyo Tri Santoso',
+            'password'    => 'Idra12345',
+            'role'        => 'r06_qa',
+        ],
+    ];
+    foreach ($org_accounts_sync as $oas) {
+        if (!in_array($frm->username, $oas['triggers'], true)) {
+            continue;
         }
-        if (!$r05_user) {
-            $r05_user = $DB->get_record('user', ['email' => 'imanjanuar44@gmail.com', 'mnethostid' => $CFG->mnet_localhost_id]);
-        }
-        if (!$r05_user) {
-            $r05_user = $DB->get_record('user', ['email' => 'cert@tatc.id', 'mnethostid' => $CFG->mnet_localhost_id]);
-        }
-        $r05_hash = hash_internal_user_password('Imanjanuar12345');
-        if ($r05_user) {
-            $need_upd = ($r05_user->username !== 'imanjm' || strtolower($r05_user->email) !== 'imanjanuar44@gmail.com' || !password_verify('Imanjanuar12345', $r05_user->password));
-            if ($need_upd) {
-                $r05_user->auth      = 'manual';
-                $r05_user->confirmed = 1;
-                $r05_user->deleted   = 0;
-                $r05_user->suspended = 0;
-                $r05_user->username  = 'imanjm';
-                $r05_user->email     = 'imanjanuar44@gmail.com';
-                $r05_user->firstname = 'Iman';
-                $r05_user->lastname  = 'Januar M';
-                $r05_user->password  = $r05_hash;
-                $DB->update_record('user', $r05_user);
+        $sync_user = $DB->get_record('user', ['username' => $oas['username'], 'mnethostid' => $CFG->mnet_localhost_id]);
+        if (!$sync_user) {
+            foreach ($oas['old_unames'] as $ou) {
+                $sync_user = $DB->get_record('user', ['username' => $ou, 'mnethostid' => $CFG->mnet_localhost_id]);
+                if ($sync_user) break;
             }
-            unset_user_preference('login_lockout', $r05_user->id);
-            unset_user_preference('login_failed_count', $r05_user->id);
-            unset_user_preference('auth_forcepasswordchange', $r05_user->id);
         }
+        if (!$sync_user) {
+            $sync_user = $DB->get_record('user', ['email' => $oas['email'], 'mnethostid' => $CFG->mnet_localhost_id]);
+        }
+        if (!$sync_user) {
+            foreach ($oas['old_emails'] as $oe) {
+                $sync_user = $DB->get_record('user', ['email' => $oe, 'mnethostid' => $CFG->mnet_localhost_id]);
+                if ($sync_user) break;
+            }
+        }
+        $sync_hash = hash_internal_user_password($oas['password']);
+        if (!$sync_user) {
+            $nu = new stdClass();
+            $nu->auth         = 'manual';
+            $nu->confirmed    = 1;
+            $nu->policyagreed = 1;
+            $nu->deleted      = 0;
+            $nu->suspended    = 0;
+            $nu->mnethostid   = $CFG->mnet_localhost_id;
+            $nu->username     = $oas['username'];
+            $nu->password     = $sync_hash;
+            $nu->firstname    = $oas['firstname'];
+            $nu->lastname     = $oas['lastname'];
+            $nu->email        = $oas['email'];
+            $nu->city         = 'Bandung';
+            $nu->country      = 'ID';
+            $nu->lang         = 'en';
+            $nu->timecreated  = time();
+            $nu->timemodified = time();
+            $nu->id = $DB->insert_record('user', $nu);
+            $sync_user = $nu;
+        } else {
+            $need_upd = ($sync_user->username !== $oas['username'] || strtolower($sync_user->email) !== $oas['email'] || !password_verify($oas['password'], $sync_user->password));
+            if ($need_upd) {
+                $sync_user->auth      = 'manual';
+                $sync_user->confirmed = 1;
+                $sync_user->deleted   = 0;
+                $sync_user->suspended = 0;
+                $sync_user->username  = $oas['username'];
+                $sync_user->email     = $oas['email'];
+                $sync_user->firstname = $oas['firstname'];
+                $sync_user->lastname  = $oas['lastname'];
+                $sync_user->password  = $sync_hash;
+                $DB->update_record('user', $sync_user);
+            }
+        }
+        $role_rec = $DB->get_record('role', ['shortname' => $oas['role']]);
+        if ($role_rec) {
+            role_assign($role_rec->id, $sync_user->id, $context->id);
+        }
+        unset_user_preference('login_lockout', $sync_user->id);
+        unset_user_preference('login_failed_count', $sync_user->id);
+        unset_user_preference('auth_forcepasswordchange', $sync_user->id);
         set_config('authloginviaemail', 1);
     }
 
