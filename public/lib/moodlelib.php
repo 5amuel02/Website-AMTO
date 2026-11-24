@@ -3062,7 +3062,8 @@ function user_not_fully_set_up($user, $strict = true) {
         return false;
     }
 
-    if (empty($user->firstname) or empty($user->lastname) or empty($user->email) or over_bounce_threshold($user)) {
+    // Izinkan akun dengan nama tunggal (mononim seperti 'Juhandi') tanpa memaksa redirect ke /user/edit.php saat lastname kosong
+    if (empty($user->firstname) or empty($user->email) or over_bounce_threshold($user)) {
         return true;
     }
 
