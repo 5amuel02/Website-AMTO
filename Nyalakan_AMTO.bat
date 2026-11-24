@@ -1,5 +1,4 @@
 @echo off
-setlocal EnableDelayedExpansion
 title Server AMTO - MariaDB 3307 ^| Moodle LMS 8081 ^| React Portal 5173
 color 0B
 
@@ -16,12 +15,9 @@ set "PROJ_DIR=%~dp0"
 if "%PROJ_DIR:~-1%"=="\" set "PROJ_DIR=%PROJ_DIR:~0,-1%"
 
 :: Tentukan lokasi tatcwebreact
-if exist "%PROJ_DIR%\tatcwebreact\package.json" (
-    set "TATCWEB_DIR=%PROJ_DIR%\tatcwebreact"
-) else if exist "C:\moodle\server\moodle\tatcwebreact\package.json" (
+set "TATCWEB_DIR=%PROJ_DIR%\tatcwebreact"
+if not exist "%TATCWEB_DIR%\package.json" (
     set "TATCWEB_DIR=C:\moodle\server\moodle\tatcwebreact"
-) else (
-    set "TATCWEB_DIR=%PROJ_DIR%\tatcwebreact"
 )
 
 echo Lokasi React : %TATCWEB_DIR%
@@ -42,11 +38,7 @@ echo   OK
 echo [2/4] Menyalakan MariaDB (port 3307)...
 del /f /q "C:\moodle\server\mysql\data\ib_buffer_pool" 2>nul
 del /f /q "C:\moodle\server\mysql\data\multi-master.info" 2>nul
-start "" /B "C:\moodle\server\mysql\bin\mysqld.exe" ^
-    --defaults-file="C:\moodle\server\mysql\bin\my.ini" ^
-    --standalone ^
-    --innodb-buffer-pool-load-at-startup=0 ^
-    --innodb-buffer-pool-dump-at-shutdown=0
+start "" /B "C:\moodle\server\mysql\bin\mysqld.exe" --defaults-file="C:\moodle\server\mysql\bin\my.ini" --standalone --innodb-buffer-pool-load-at-startup=0 --innodb-buffer-pool-dump-at-shutdown=0
 timeout /t 4 /nobreak >nul
 echo   OK - MariaDB port 3307
 
@@ -59,22 +51,14 @@ timeout /t 2 /nobreak >nul
 echo   OK - Apache port 8081
 
 :: ================================================================
-:: STEP 4 - Jalankan React Portal via launcher script
+:: STEP 4 - Jalankan React Portal via file .bat permanen
 :: ================================================================
 echo [4/4] Menyalakan TATC React Portal (port 5173 + API 3001)...
-
-if exist "%TATCWEB_DIR%\package.json" (
-    :: Buat file launcher sementara untuk menghindari masalah kutip dalam cmd /k
-    set "LAUNCHER=%TEMP%\tatc_launch.bat"
-    echo @echo off > "%LAUNCHER%"
-    echo title TATC React Portal >> "%LAUNCHER%"
-    echo cd /d "%TATCWEB_DIR%" >> "%LAUNCHER%"
-    echo npm run dev >> "%LAUNCHER%"
-    start "TATC React Portal" cmd /k "%LAUNCHER%"
+if exist "%TATCWEB_DIR%\Jalankan_React.bat" (
+    start "TATC React Portal" cmd /k "%TATCWEB_DIR%\Jalankan_React.bat"
     echo   OK - React Portal dimulai di jendela terpisah
 ) else (
-    echo   PERINGATAN: Folder tatcwebreact tidak ditemukan.
-    echo   Jalankan SETUP_LAPTOP.bat terlebih dahulu.
+    echo   PERINGATAN: File Jalankan_React.bat tidak ditemukan di %TATCWEB_DIR%
 )
 
 :: ================================================================
@@ -95,12 +79,12 @@ echo   [Moodle LMS]   http://localhost:8081
 echo     Login        : admin / Admin123@2
 echo.
 echo   [TATC Portal]  http://localhost:5173
-echo     Admin        : admin@tatc.id    / Admin123@2
+echo     Admin        : admin@tatc.id      / Admin123@2
 echo     Instruktur   : instruktur@tatc.id / Admin123@2
-echo     Peserta      : peserta@tatc.id  / Admin123@2
+echo     Peserta      : peserta@tatc.id    / Admin123@2
 echo.
 echo   Ketik Y lalu Enter untuk matikan semua server.
-echo   Atau tutup jendela ini saja (server tetap berjalan).
+echo   Atau tutup jendela ini saja (server tetap berjalan di background).
 echo ================================================================
 echo.
 set /p SHUTDOWN="Matikan server sekarang? (Y/N): "
