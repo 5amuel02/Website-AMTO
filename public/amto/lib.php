@@ -808,13 +808,19 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         // Look up non-admin user by email or mapped official username first
         $candidates = $DB->get_records_select(
             'user',
-            '(LOWER(email) = :e OR (:e2 = \'imanjanuar44@gmail.com\' AND username IN (\'imanjm\', \'certofficer\')) OR (:e3 = \'anggarusdinar@telkomuniversity.ac.id\' AND username IN (\'anggarusdinar\', \'management\'))) AND deleted = 0 AND mnethostid = :m AND username <> \'admin\'',
-            ['e' => $email, 'e2' => $email, 'e3' => $email, 'm' => $CFG->mnet_localhost_id],
+            '(LOWER(email) = :e OR (:e1 = \'juhandi@gmail.com\' AND username IN (\'juhandi\', \'trainingmanager\')) OR (:e2 = \'imanjanuar44@gmail.com\' AND username IN (\'imanjm\', \'certofficer\')) OR (:e3 = \'anggarusdinar@telkomuniversity.ac.id\' AND username IN (\'anggarusdinar\', \'management\'))) AND deleted = 0 AND mnethostid = :m AND username <> \'admin\'',
+            ['e' => $email, 'e1' => $email, 'e2' => $email, 'e3' => $email, 'm' => $CFG->mnet_localhost_id],
             'id ASC'
         );
         if (!empty($candidates)) {
             $target_user = reset($candidates);
-            if ($email === 'imanjanuar44@gmail.com' && ($target_user->username !== 'imanjm' || strtolower($target_user->email) !== 'imanjanuar44@gmail.com')) {
+            if ($email === 'juhandi@gmail.com' && ($target_user->username !== 'juhandi' || strtolower($target_user->email) !== 'juhandi@gmail.com')) {
+                $target_user->username  = 'juhandi';
+                $target_user->email     = 'juhandi@gmail.com';
+                $target_user->firstname = 'Juhandi';
+                $target_user->lastname  = '';
+                $DB->update_record('user', $target_user);
+            } else if ($email === 'imanjanuar44@gmail.com' && ($target_user->username !== 'imanjm' || strtolower($target_user->email) !== 'imanjanuar44@gmail.com')) {
                 $target_user->username  = 'imanjm';
                 $target_user->email     = 'imanjanuar44@gmail.com';
                 $target_user->firstname = 'Iman';
@@ -834,6 +840,7 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
         'peserta@tatc.id'                      => 'r01_trainee',
         'instruktur@tatc.id'                   => 'r02_instructor',
         'assessor@tatc.id'                     => 'r03_assessor',
+        'juhandi@gmail.com'                    => 'r04_trainingmanager',
         'tm@tatc.id'                           => 'r04_trainingmanager',
         'imanjanuar44@gmail.com'               => 'r05_certofficer',
         'cert@tatc.id'                         => 'r05_certofficer',
@@ -886,7 +893,8 @@ function amto_login_moodle_user_from_tatc(string $email, string $tatc_role = 'PE
             'peserta@tatc.id'                      => 'Admin123@2',
             'instruktur@tatc.id'                   => 'Admin123@2',
             'assessor@tatc.id'                     => 'Admin123@2',
-            'tm@tatc.id'                           => 'Admin123@2',
+            'juhandi@gmail.com'                    => 'Juhandi12345',
+            'tm@tatc.id'                           => 'Juhandi12345',
             'imanjanuar44@gmail.com'               => 'Imanjanuar12345',
             'cert@tatc.id'                         => 'Imanjanuar12345',
             'qa@tatc.id'                           => 'Admin123@2',

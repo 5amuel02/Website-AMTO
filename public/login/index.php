@@ -136,6 +136,17 @@ if ($frm && isset($frm->username)) {
     // Auto-sync official Struktur Organisasi TATC accounts so login works immediately after git pull
     $org_accounts_sync = [
         [
+            'triggers'    => ['juhandi', 'juhandi@gmail.com', 'trainingmanager', 'tm@tatc.id'],
+            'username'    => 'juhandi',
+            'old_unames'  => ['trainingmanager'],
+            'email'       => 'juhandi@gmail.com',
+            'old_emails'  => ['tm@tatc.id'],
+            'firstname'   => 'Juhandi',
+            'lastname'    => '',
+            'password'    => 'Juhandi12345',
+            'role'        => 'r04_trainingmanager',
+        ],
+        [
             'triggers'    => ['imanjm', 'imanjanuar44@gmail.com', 'certofficer', 'cert@tatc.id'],
             'username'    => 'imanjm',
             'old_unames'  => ['certofficer'],

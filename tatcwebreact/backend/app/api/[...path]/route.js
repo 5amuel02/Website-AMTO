@@ -46,7 +46,7 @@ function resolveAmtoRole(subject) {
 
   if (['qa@tatc.id', 'umismd@gmail.com', 'asfriyantot@gmail.com', 'indset69@gmail.com'].includes(email) || ['QA', 'R06_QA'].includes(rawRole)) return 'R06_QA';
   if (['anggarusdinar@telkomuniversity.ac.id', 'manajemen@tatc.id', 'management@tatc.id'].includes(email) || ['MANAGEMENT', 'MANAJEMEN', 'R08_MANAGEMENT'].includes(rawRole)) return 'R08_MANAGEMENT';
-  if (email === 'tm@tatc.id' || ['TRAININGMANAGER', 'R04_TM'].includes(rawRole)) return 'R04_TM';
+  if (['juhandi@gmail.com', 'tm@tatc.id'].includes(email) || ['TRAININGMANAGER', 'R04_TM'].includes(rawRole)) return 'R04_TM';
   if (['imanjanuar44@gmail.com', 'cert@tatc.id'].includes(email) || ['CERTOFFICER', 'R05_CERT'].includes(rawRole)) return 'R05_CERT';
   if (email === 'assessor@tatc.id' || ['ASSESSOR', 'R03_ASSESSOR'].includes(rawRole)) return 'R03_ASSESSOR';
   if (email === 'admin@tatc.id' || ['SUPERADMIN', 'SUPER_ADMIN', 'R07_ADMIN_IT'].includes(rawRole)) return 'R07_ADMIN_IT';
@@ -109,8 +109,10 @@ const USERNAME_TO_EMAIL_MAP = {
   peserta: 'peserta@tatc.id',
   instruktur: 'instruktur@tatc.id',
   assessor: 'assessor@tatc.id',
-  trainingmanager: 'tm@tatc.id',
-  tm: 'tm@tatc.id',
+  juhandi: 'juhandi@gmail.com',
+  trainingmanager: 'juhandi@gmail.com',
+  tm: 'juhandi@gmail.com',
+  'tm@tatc.id': 'juhandi@gmail.com',
   imanjm: 'imanjanuar44@gmail.com',
   certofficer: 'imanjanuar44@gmail.com',
   'cert@tatc.id': 'imanjanuar44@gmail.com',
@@ -126,6 +128,7 @@ const USERNAME_TO_EMAIL_MAP = {
 };
 
 const OFFICIAL_TATC_AUTO_PROVISION = {
+  'juhandi@gmail.com': { pass: 'Juhandi12345', role: 'ADMIN', oldEmail: 'tm@tatc.id' },
   'imanjanuar44@gmail.com': { pass: 'Imanjanuar12345', role: 'ADMIN', oldEmail: 'cert@tatc.id' },
   'umismd@gmail.com': { pass: 'Umi12345', role: 'ADMIN' },
   'asfriyantot@gmail.com': { pass: 'Teguhasfriyanto12345', role: 'ADMIN' },
