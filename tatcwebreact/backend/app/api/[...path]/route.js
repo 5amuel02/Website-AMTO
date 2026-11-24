@@ -1610,21 +1610,63 @@ export async function POST(request, context) {
       const passHash = (await bcrypt.hash(rawPassword, 10)).replace(/^\$2[ab]\$/, '$2y$');
       const nowSec = Math.floor(Date.now() / 1000);
 
-      const [ins] = await pool.query(
-        `INSERT INTO moodle.mdl_amto_registrations
-          (registration_no, userid, username, fullname, nik, email, phone, organization, amel_no, schedule_id, program_name, password_hash, doc_ktp, doc_ijazah, doc_pendukung, status, admin_notes, created_by, verified_by, timecreated, timemodified)
-         VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'Menunggu verifikasi berkas prasyarat oleh Admin / Training Manager.', 0, 0, ?, ?)`,
-        [regNo, username, fullname, nik, email, phone, organization, amel_no, scheduleId, progName, passHash, docKtp, docIjazah, docPendukung, nowSec, nowSec]
-      );
+      // Check if this same person (by email, username, or NIK) already has an active registration record
+      const [existingPersonRows] = await pool.query(
+        `SELECT * FROM moodle.mdl_amto_registrations
+          WHERE LOWER(status) NOT IN ('void', 'voided')
+            AND (LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) OR (nik = ? AND nik <> ''))
+          ORDER BY id ASC LIMIT 1`,
+        [email, username, nik]
+      ).catch(() => [[]]);
+
+      let finalId = 0;
+      let finalRegNo = regNo;
+      if (existingPersonRows[0]) {
+        const ex = existingPersonRows[0];
+        finalId = ex.id;
+        finalRegNo = ex.registration_no;
+        await pool.query(
+          `UPDATE moodle.mdl_amto_registrations
+              SET username=?, fullname=?, nik=?, email=?, phone=?, organization=?, amel_no=?,
+                  schedule_id=CASE WHEN ?>0 THEN ? ELSE schedule_id END,
+                  program_name=CASE WHEN ?>0 THEN ? ELSE program_name END,
+                  password_hash=?,
+                  doc_ktp=CASE WHEN ?<>'' THEN ? ELSE doc_ktp END,
+                  doc_ijazah=CASE WHEN ?<>'' THEN ? ELSE doc_ijazah END,
+                  doc_pendukung=CASE WHEN ?<>'' THEN ? ELSE doc_pendukung END,
+                  status='pending',
+                  admin_notes='Berkas pengajuan ulang (revisi) menunggu verifikasi Admin / Training Manager.',
+                  timemodified=?
+            WHERE id=?`,
+          [
+            username, fullname, nik, email, phone, organization, amel_no,
+            scheduleId, scheduleId,
+            scheduleId, progName,
+            passHash,
+            docKtp, docKtp,
+            docIjazah, docIjazah,
+            docPendukung, docPendukung,
+            nowSec, finalId
+          ]
+        );
+      } else {
+        const [ins] = await pool.query(
+          `INSERT INTO moodle.mdl_amto_registrations
+            (registration_no, userid, username, fullname, nik, email, phone, organization, amel_no, schedule_id, program_name, password_hash, doc_ktp, doc_ijazah, doc_pendukung, status, admin_notes, created_by, verified_by, timecreated, timemodified)
+           VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'Menunggu verifikasi berkas prasyarat oleh Admin / Training Manager.', 0, 0, ?, ?)`,
+          [regNo, username, fullname, nik, email, phone, organization, amel_no, scheduleId, progName, passHash, docKtp, docIjazah, docPendukung, nowSec, nowSec]
+        );
+        finalId = ins.insertId;
+      }
 
       await pool.query(
         `INSERT INTO participants (participant_number, full_name, phone, email, status, nik, institution, created_at, updated_at)
          VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, NOW(), NOW())
          ON DUPLICATE KEY UPDATE full_name=VALUES(full_name), phone=VALUES(phone), nik=VALUES(nik), institution=VALUES(institution), updated_at=NOW()`,
-        [regNo, fullname, phone, email, nik.slice(0, 20), organization]
+        [finalRegNo, fullname, phone, email, nik.slice(0, 20), organization]
       ).catch(() => {});
 
-      return ok({ id: ins.insertId, registration_no: regNo }, 'Berkas registrasi & verifikasi kelayakan berhasil dikirim.');
+      return ok({ id: finalId, registration_no: finalRegNo }, 'Berkas registrasi & verifikasi kelayakan berhasil dikirim.');
     }
 
     if (route.match(/^admin\/registrations\/[^/]+\/verify$/)) {

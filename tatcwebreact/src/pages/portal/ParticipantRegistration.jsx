@@ -399,7 +399,22 @@ const ParticipantRegistration = () => {
                     <td style={{ padding: '14px' }}>
                       {renderStatusBadge(r.status)}
                       {r.admin_notes && (
-                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '5px', maxWidth: '230px' }}>
+                        <div style={{
+                          fontSize: '0.8rem',
+                          color: String(r.status).toLowerCase() === 'rejected' ? '#b91c1c' : 'var(--text-muted)',
+                          fontWeight: String(r.status).toLowerCase() === 'rejected' ? 700 : 400,
+                          background: String(r.status).toLowerCase() === 'rejected' ? '#fef2f2' : 'transparent',
+                          border: String(r.status).toLowerCase() === 'rejected' ? '1px solid #fecaca' : 'none',
+                          padding: String(r.status).toLowerCase() === 'rejected' ? '6px 10px' : '0',
+                          borderRadius: '8px',
+                          marginTop: '6px',
+                          maxWidth: '250px'
+                        }}>
+                          {String(r.status).toLowerCase() === 'rejected' && (
+                            <span style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', color: '#991b1b', marginBottom: '2px' }}>
+                              Alasan Penolakan Admin:
+                            </span>
+                          )}
                           {r.admin_notes}
                         </div>
                       )}

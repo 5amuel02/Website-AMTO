@@ -515,10 +515,6 @@ function amto_sync_cross_db(bool $force = false): void {
                 $nr->timecreated     = !empty($tr->submitted_at) ? (strtotime((string)$tr->submitted_at) ?: time()) : time();
                 $nr->timemodified    = time();
                 $DB->insert_record('amto_registrations', $nr);
-            } else if ($existing_mreg->status === 'pending' && $mstat !== 'pending') {
-                $existing_mreg->status = $mstat;
-                $existing_mreg->timemodified = time();
-                $DB->update_record('amto_registrations', $existing_mreg);
             }
         }
 
@@ -596,7 +592,7 @@ function amto_sync_cross_db(bool $force = false): void {
                 );
             } else {
                 $treg_row = reset($existing_treg);
-                if ($treg_row->status !== $t_reg_stat && $mr->status !== 'pending') {
+                if ($treg_row->status !== $t_reg_stat) {
                     $DB->execute(
                         "UPDATE tatc_web.participant_registrations SET status = ?, updated_at = NOW() WHERE id = ?",
                         [$t_reg_stat, $treg_row->id]
