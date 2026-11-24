@@ -15,6 +15,10 @@ $PAGE->set_heading('Data & Verifikasi Registrasi Peserta');
 
 $role = amto_current_role();
 $rbac_role = amto_current_rbac_role();
+if ($role === 'student' || $role === 'guest') {
+    header('Location: http://localhost:5173/portal/participant/registration');
+    exit;
+}
 $can_verify_reg = in_array($rbac_role, ['admin', 'trainingmanager', 'certofficer'], true);
 $is_audit_readonly = in_array($rbac_role, ['qa', 'management', 'adminit'], true);
 $notice_msg = '';
@@ -95,8 +99,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
     $schedule_id = optional_param('schedule_id', 0, PARAM_INT);
     $raw_password = optional_param('password', '', PARAM_RAW);
 
-    if ($fullname === '' || $username === '' || $nik === '' || $email === '' || $schedule_id <= 0) {
-        $notice_msg = 'Mohon lengkapi seluruh kolom wajib (Nama Lengkap, Username, NIK, Email, dan Program Pelatihan).';
+    if ($fullname === '' || $username === '' || $nik === '' || $email === '') {
+        $notice_msg = 'Mohon lengkapi seluruh kolom wajib (Nama Lengkap, Username, NIK, dan Email).';
         $notice_type = 'danger';
     } else if ($username === 'admin' || $username === 'guest') {
         $notice_msg = 'Username tersebut sudah digunakan oleh sistem. Silakan gunakan username peserta lain.';
@@ -107,49 +111,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
     } else {
         $existing_reg = $DB->get_record_select(
             'amto_registrations',
-            'username = :u AND schedule_id = :s AND status IN (\'pending\', \'approved\')',
-            ['u' => $username, 's' => $schedule_id]
+            '(LOWER(username) = LOWER(:u) OR LOWER(email) = LOWER(:e) OR (nik = :n AND nik <> \'\')) AND LOWER(status) NOT IN (\'void\', \'voided\')',
+            ['u' => $username, 'e' => $email, 'n' => $nik],
+            '*',
+            IGNORE_MULTIPLE
         );
+
+        $sched = ($schedule_id > 0) ? $DB->get_record('amto_schedules', ['id' => $schedule_id]) : null;
+        $prog_name = $sched ? ($sched->batch_code . ' – ' . $sched->program_name) : 'Verifikasi Kelayakan Peserta (Eligibility Check AMTO)';
+
         if ($existing_reg) {
-            header('Location: /amto/registrasi.php?q=' . urlencode($existing_reg->registration_no) . '&registered=1');
-            exit;
+            $reg_no = $existing_reg->registration_no;
+            $doc_ktp = amto_save_uploaded_doc('doc_ktp', $reg_no);
+            $doc_ijazah = amto_save_uploaded_doc('doc_ijazah', $reg_no);
+            $doc_pendukung = amto_save_uploaded_doc('doc_pendukung', $reg_no);
+
+            $existing_reg->username = $username;
+            $existing_reg->fullname = $fullname;
+            $existing_reg->nik = $nik;
+            $existing_reg->email = $email;
+            $existing_reg->phone = $phone;
+            $existing_reg->organization = $organization ?: 'Mandiri / Umum';
+            $existing_reg->amel_no = $amel_no;
+            if ($schedule_id > 0) {
+                $existing_reg->schedule_id = $schedule_id;
+                $existing_reg->program_name = $prog_name;
+            }
+            $existing_reg->password_hash = hash_internal_user_password($raw_password);
+            if ($doc_ktp !== '') {
+                $existing_reg->doc_ktp = $doc_ktp;
+            }
+            if ($doc_ijazah !== '') {
+                $existing_reg->doc_ijazah = $doc_ijazah;
+            }
+            if ($doc_pendukung !== '') {
+                $existing_reg->doc_pendukung = $doc_pendukung;
+            }
+            $existing_reg->status = 'pending';
+            $existing_reg->admin_notes = 'Berkas pengajuan ulang (revisi) menunggu verifikasi Admin / Training Manager.';
+            $existing_reg->timemodified = time();
+            $DB->update_record('amto_registrations', $existing_reg);
+            $new_reg_id = $existing_reg->id;
+        } else {
+            $last_records = $DB->get_records('amto_registrations', null, 'id DESC', 'id', 0, 1);
+            $next_num = !empty($last_records) ? (reset($last_records)->id + 1) : 1;
+            $reg_no = sprintf('REG-AMTO-2026-%04d', $next_num);
+
+            $doc_ktp = amto_save_uploaded_doc('doc_ktp', $reg_no);
+            $doc_ijazah = amto_save_uploaded_doc('doc_ijazah', $reg_no);
+            $doc_pendukung = amto_save_uploaded_doc('doc_pendukung', $reg_no);
+
+            $record = new stdClass();
+            $record->registration_no = $reg_no;
+            $record->userid = 0;
+            $record->username = $username;
+            $record->fullname = $fullname;
+            $record->nik = $nik;
+            $record->email = $email;
+            $record->phone = $phone;
+            $record->organization = $organization ?: 'Mandiri / Umum';
+            $record->amel_no = $amel_no;
+            $record->schedule_id = $schedule_id;
+            $record->program_name = $prog_name;
+            $record->password_hash = hash_internal_user_password($raw_password);
+            $record->doc_ktp = $doc_ktp;
+            $record->doc_ijazah = $doc_ijazah;
+            $record->doc_pendukung = $doc_pendukung;
+            $record->status = 'pending';
+            $record->admin_notes = 'Menunggu verifikasi berkas prasyarat oleh Admin / Training Manager.';
+            $record->created_by = (isloggedin() && !isguestuser()) ? (int)$USER->id : 0;
+            $record->verified_by = 0;
+            $record->timecreated = time();
+            $record->timemodified = time();
+
+            $new_reg_id = $DB->insert_record('amto_registrations', $record);
         }
-
-        $sched = $DB->get_record('amto_schedules', ['id' => $schedule_id]);
-        $prog_name = $sched ? ($sched->batch_code . ' – ' . $sched->program_name) : 'Program Pelatihan AMTO';
-
-        $last_records = $DB->get_records('amto_registrations', null, 'id DESC', 'id', 0, 1);
-        $next_num = !empty($last_records) ? (reset($last_records)->id + 1) : 1;
-        $reg_no = sprintf('REG-AMTO-2026-%04d', $next_num);
-
-        $doc_ktp = amto_save_uploaded_doc('doc_ktp', $reg_no);
-        $doc_ijazah = amto_save_uploaded_doc('doc_ijazah', $reg_no);
-        $doc_pendukung = amto_save_uploaded_doc('doc_pendukung', $reg_no);
-
-        $record = new stdClass();
-        $record->registration_no = $reg_no;
-        $record->userid = 0;
-        $record->username = $username;
-        $record->fullname = $fullname;
-        $record->nik = $nik;
-        $record->email = $email;
-        $record->phone = $phone;
-        $record->organization = $organization ?: 'Mandiri / Umum';
-        $record->amel_no = $amel_no;
-        $record->schedule_id = $schedule_id;
-        $record->program_name = $prog_name;
-        $record->password_hash = hash_internal_user_password($raw_password);
-        $record->doc_ktp = $doc_ktp;
-        $record->doc_ijazah = $doc_ijazah;
-        $record->doc_pendukung = $doc_pendukung;
-        $record->status = 'pending';
-        $record->admin_notes = 'Menunggu verifikasi berkas prasyarat oleh Admin / Training Manager.';
-        $record->created_by = (isloggedin() && !isguestuser()) ? (int)$USER->id : 0;
-        $record->verified_by = 0;
-        $record->timecreated = time();
-        $record->timemodified = time();
-
-        $new_reg_id = $DB->insert_record('amto_registrations', $record);
         if (function_exists('amto_sync_cross_db')) {
             amto_sync_cross_db(true);
         }
@@ -305,7 +341,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_verify_reg && in_array($action
 }
 
 $schedules = $DB->get_records('amto_schedules', null, 'start_date ASC');
-$all_regs = $DB->get_records('amto_registrations', null, 'timecreated DESC');
+$raw_regs = $DB->get_records('amto_registrations', null, 'timemodified DESC, id DESC');
+
+// Deduplicate registrations per unique person (by email / username / NIK) so the same person is never counted twice
+$all_regs = [];
+$seen_people = [];
+foreach ($raw_regs as $rr) {
+    if (in_array(strtolower((string)$rr->status), ['void', 'voided'], true)) {
+        continue;
+    }
+    $person_key = strtolower(trim((string)$rr->email)) ?: strtolower(trim((string)$rr->username));
+    if ($person_key !== '' && isset($seen_people[$person_key])) {
+        continue;
+    }
+    if ($person_key !== '') {
+        $seen_people[$person_key] = true;
+    }
+    $all_regs[$rr->id] = $rr;
+}
 
 $total_count = count($all_regs);
 $pending_count = 0;
@@ -382,10 +435,10 @@ echo amto_render_shared_styles();
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                 <span>Lihat Jadwal &amp; Batch Pelatihan</span>
             </a>
-            <?php if ($role === 'admin'): ?>
-            <button type="button" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:700;" onclick="var f=document.getElementById('tatcRegFormPanel'); f.style.display = (f.style.display==='none' ? 'block' : 'none');">
+            <?php if ($role === 'admin' || ($role === 'student' && empty($visible_regs))): ?>
+            <button type="button" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:700;" onclick="var f=document.getElementById('tatcRegFormPanel'); if(f){ f.style.display = (f.style.display==='none' ? 'block' : 'none'); }">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                <span>Input Pendaftar Baru</span>
+                <span><?php echo ($role === 'admin') ? 'Input Pendaftar Baru' : 'Ajukan Verifikasi Kelayakan (Eligibility)'; ?></span>
             </button>
             <?php elseif ($role === 'guest'): ?>
             <a href="/login/index.php" class="tatc-btn-outline" style="background:#ffffff; color:#b91c1c !important; border:none; font-weight:700;">
@@ -572,7 +625,10 @@ echo amto_render_shared_styles();
                                         <span class="tatc-badge tatc-badge-pending">Menunggu Verifikasi</span>
                                     <?php endif; ?>
                                     <?php if (!empty($r->admin_notes)): ?>
-                                        <div style="font-size:11.5px; color:#64748b; margin-top:4px; max-width:220px;">
+                                        <div style="font-size:11.5px; color:<?php echo ($r->status === 'rejected') ? '#b91c1c' : '#64748b'; ?>; font-weight:<?php echo ($r->status === 'rejected') ? '700' : '400'; ?>; margin-top:5px; max-width:240px; <?php echo ($r->status === 'rejected') ? 'background:#fef2f2; border:1px solid #fecaca; padding:6px 8px; border-radius:8px;' : ''; ?>">
+                                            <?php if ($r->status === 'rejected'): ?>
+                                                <span style="display:block; font-size:10.5px; text-transform:uppercase; color:#991b1b; margin-bottom:2px;">Alasan Penolakan:</span>
+                                            <?php endif; ?>
                                             <?php echo s($r->admin_notes); ?>
                                         </div>
                                     <?php endif; ?>
@@ -580,7 +636,7 @@ echo amto_render_shared_styles();
                                 <?php if ($role === 'admin'): ?>
                                 <td>
                                     <?php if ($is_audit_readonly): ?>
-                                        <span class="tatc-doc-pill" title="SCP-06 / SCP-08: Role Anda bersifat Read-Only Audit / Teknis">🔍 Read-Only (<?php echo s(strtoupper($rbac_role)); ?>)</span>
+                                        <span class="tatc-doc-pill" title="SCP-06 / SCP-08: Role Anda bersifat Read-Only Audit / Teknis">Read-Only (<?php echo s(strtoupper($rbac_role)); ?>)</span>
                                     <?php else: ?>
                                     <div class="d-flex flex-wrap gap-1">
                                         <?php if ($r->status !== 'approved' && $r->status !== 'void'): ?>
@@ -593,15 +649,10 @@ echo amto_render_shared_styles();
                                             </button>
                                         </form>
                                         <?php endif; ?>
-                                        <?php if ($r->status !== 'rejected' && $r->status !== 'void'): ?>
-                                        <form method="post" action="/amto/registrasi.php" style="display:inline;">
-                                            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
-                                            <input type="hidden" name="action" value="reject">
-                                            <input type="hidden" name="regid" value="<?php echo $r->id; ?>">
-                                            <button type="submit" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px; color:#b91c1c !important; border-color:#fecaca;">
-                                                Tolak / Revisi
-                                            </button>
-                                        </form>
+                                        <?php if ($r->status !== 'void'): ?>
+                                        <button type="button" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px; color:#b91c1c !important; border-color:#fecaca; background:#fef2f2;" onclick="var box=document.getElementById('rejectBox_<?php echo (int)$r->id; ?>'); box.style.display=(box.style.display==='none'?'block':'none'); var inp=document.getElementById('rejectInput_<?php echo (int)$r->id; ?>'); if(inp) inp.focus();">
+                                            <?php echo ($r->status === 'rejected') ? 'Edit Alasan Tolak' : 'Tolak / Revisi'; ?>
+                                        </button>
                                         <?php endif; ?>
                                         <?php if ($r->status !== 'void'): ?>
                                         <form method="post" action="/amto/registrasi.php" style="display:inline;" onsubmit="return confirm('Tandai pendaftaran ini sebagai VOID (Soft-Delete sesuai SEC-05)?');">
@@ -614,6 +665,37 @@ echo amto_render_shared_styles();
                                         </form>
                                         <?php endif; ?>
                                     </div>
+
+                                    <?php if ($r->status !== 'void'): ?>
+                                    <div id="rejectBox_<?php echo (int)$r->id; ?>" style="display:none; margin-top:8px; padding:10px; background:#fef2f2; border:1px solid #fecaca; border-radius:10px; min-width:230px;">
+                                        <form method="post" action="/amto/registrasi.php">
+                                            <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                            <input type="hidden" name="action" value="reject">
+                                            <input type="hidden" name="regid" value="<?php echo (int)$r->id; ?>">
+                                            <label style="display:block; font-size:11px; font-weight:800; color:#991b1b; margin-bottom:4px;">
+                                                Komentar / Alasan Penolakan *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                id="rejectInput_<?php echo (int)$r->id; ?>"
+                                                name="admin_notes"
+                                                class="tatc-input"
+                                                style="padding:6px 10px; font-size:12px; margin-bottom:6px; background:#ffffff; border-color:#fca5a5;"
+                                                placeholder="Contoh: Ijazah palsu / KTP tidak sesuai..."
+                                                value="<?php echo ($r->status === 'rejected') ? s($r->admin_notes) : ''; ?>"
+                                                required
+                                            >
+                                            <div class="d-flex justify-content-end gap-1">
+                                                <button type="button" class="tatc-btn-outline" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('rejectBox_<?php echo (int)$r->id; ?>').style.display='none';">
+                                                    Batal
+                                                </button>
+                                                <button type="submit" class="tatc-btn-red" style="padding:4px 10px; font-size:11px;">
+                                                    Simpan &amp; Tolak
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                    <?php endif; ?>
                                     <?php endif; ?>
                                 </td>
                                 <?php else: ?>
@@ -642,15 +724,15 @@ echo amto_render_shared_styles();
     </div>
     <?php endif; ?>
 
-    <!-- FORM PENDAFTARAN PESERTA BARU: Hanya tampil untuk Guest (belum login) atau ketika Admin klik Input Pendaftar Baru -->
-    <?php if ($role === 'guest' || $role === 'admin'): ?>
+    <!-- FORM PENDAFTARAN & VERIFIKASI KELAYAKAN PESERTA (ELIGIBILITY CHECK AMTO) -->
+    <?php if ($role === 'guest' || $role === 'admin' || ($role === 'student' && empty($visible_regs))): ?>
     <div id="tatcRegFormPanel" class="tatc-panel" style="<?php echo ($role === 'admin' || $check_query !== '') ? 'display:none;' : 'display:block;'; ?>">
         <div class="tatc-panel-header">
             <div>
-                <h2 class="tatc-panel-title">Formulir Pendaftaran Peserta Pelatihan AMTO Baru</h2>
-                <p class="tatc-panel-sub">Lengkapi identitas sesuai KTP, pilih jadwal batch pelatihan, dan unggah dokumen prasyarat (Format: PDF/JPG/PNG, Maks. 5 MB).</p>
+                <h2 class="tatc-panel-title">Formulir Pendaftaran &amp; Verifikasi Kelayakan Peserta (Eligibility Check AMTO)</h2>
+                <p class="tatc-panel-sub">Lengkapi identitas sesuai KTP dan unggah dokumen prasyarat (KTP, Ijazah, AMEL/Surat Tugas — PDF/JPG/PNG, Maks. 5 MB) untuk diperiksa kelayakannya oleh Admin / Training Manager.</p>
             </div>
-            <span class="tatc-badge tatc-badge-open">Standar IAM-03 &amp; Validasi Berkas</span>
+            <span class="tatc-badge tatc-badge-open">Verifikasi Eligibility Peserta</span>
         </div>
 
         <form method="post" action="/amto/registrasi.php" enctype="multipart/form-data">
@@ -660,11 +742,11 @@ echo amto_render_shared_styles();
             <div class="tatc-form-grid mb-3">
                 <div>
                     <label class="tatc-label">Nama Lengkap (Sesuai KTP &amp; Sertifikat) *</label>
-                    <input type="text" name="fullname" class="tatc-input" placeholder="Contoh: Andi Pratama Wijaya" required>
+                    <input type="text" name="fullname" class="tatc-input" placeholder="Contoh: Andi Pratama Wijaya" value="<?php echo ($role === 'student' && isloggedin()) ? s(fullname($USER)) : ''; ?>" required>
                 </div>
                 <div>
-                    <label class="tatc-label">Username Akun LMS (Untuk Login Nanti) *</label>
-                    <input type="text" name="username" class="tatc-input" placeholder="Contoh: samuelm (huruf kecil tanpa spasi)" required>
+                    <label class="tatc-label">Username Akun LMS *</label>
+                    <input type="text" name="username" class="tatc-input" placeholder="Contoh: samuelm (huruf kecil tanpa spasi)" value="<?php echo ($role === 'student' && isloggedin()) ? s($USER->username) : ''; ?>" required>
                 </div>
                 <div>
                     <label class="tatc-label">NIK (Nomor Induk Kependudukan) *</label>
@@ -672,7 +754,7 @@ echo amto_render_shared_styles();
                 </div>
                 <div>
                     <label class="tatc-label">Alamat Email Resmi *</label>
-                    <input type="email" name="email" class="tatc-input" placeholder="nama@perusahaan.com" required>
+                    <input type="email" name="email" class="tatc-input" placeholder="nama@perusahaan.com" value="<?php echo ($role === 'student' && isloggedin()) ? s($USER->email) : ''; ?>" required>
                 </div>
                 <div>
                     <label class="tatc-label">Nomor Telepon / WhatsApp *</label>
@@ -684,7 +766,7 @@ echo amto_render_shared_styles();
                 </div>
                 <div>
                     <label class="tatc-label">Nomor Lisensi AMEL / Basic Certificate (Opsional)</label>
-                    <input type="text" name="amel_no" class="tatc-input" placeholder="Kosongkan jika mengambil Basic License baru">
+                    <input type="text" name="amel_no" class="tatc-input" placeholder="Kosongkan jika belum memiliki AMEL">
                 </div>
                 <div>
                     <label class="tatc-label">Password Akun LMS (Min. 8 Karakter - Standar IAM-03) *</label>
@@ -693,9 +775,9 @@ echo amto_render_shared_styles();
             </div>
 
             <div class="mb-3">
-                <label class="tatc-label">Pilih Program &amp; Batch Jadwal Pelatihan AMTO *</label>
-                <select name="schedule_id" class="tatc-select" required>
-                    <option value="">-- Pilih Batch &amp; Program Pelatihan --</option>
+                <label class="tatc-label">Tujuan Verifikasi Kelayakan / Jadwal Pelatihan (Opsional jika jadwal belum dibuat)</label>
+                <select name="schedule_id" class="tatc-select">
+                    <option value="0">Verifikasi Kelayakan Peserta Umum (Eligibility Check AMTO CASR Part 147)</option>
                     <?php foreach ($schedules as $s): ?>
                         <option value="<?php echo $s->id; ?>" <?php echo ($preselect_schedule == $s->id) ? 'selected' : ''; ?>>
                             [<?php echo s($s->batch_code); ?>] <?php echo s($s->program_name); ?> &mdash; Mulai: <?php echo s($s->start_date); ?> (<?php echo s($s->room_location); ?>)
@@ -722,7 +804,7 @@ echo amto_render_shared_styles();
             <div class="d-flex justify-content-end gap-2">
                 <button type="submit" class="tatc-btn-red">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                    <span>Kirim Pendaftaran Peserta</span>
+                    <span>Kirim Berkas Verifikasi Kelayakan Peserta</span>
                 </button>
             </div>
         </form>

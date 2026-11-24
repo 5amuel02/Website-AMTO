@@ -133,6 +133,167 @@ if ($frm && isset($frm->username)) {
     // Login WITH cookies.
     $frm->username = trim(core_text::strtolower($frm->username));
 
+    // Auto-sync official Struktur Organisasi TATC accounts so login works immediately after git pull
+    $org_accounts_sync = [
+        [
+            'triggers'    => ['ema', 'emacdef@telkomuniversity.ac.id'],
+            'username'    => 'ema',
+            'old_unames'  => [],
+            'email'       => 'emacdef@telkomuniversity.ac.id',
+            'old_emails'  => [],
+            'firstname'   => 'Ema',
+            'lastname'    => '',
+            'password'    => 'emacdef12345',
+            'role'        => 'r04_trainingmanager',
+        ],
+        [
+            'triggers'    => ['juhandi', 'juhandi@gmail.com', 'trainingmanager', 'tm@tatc.id'],
+            'username'    => 'juhandi',
+            'old_unames'  => ['trainingmanager'],
+            'email'       => 'juhandi@gmail.com',
+            'old_emails'  => ['tm@tatc.id'],
+            'firstname'   => 'Juhandi',
+            'lastname'    => '',
+            'password'    => 'Juhandi12345',
+            'role'        => 'r04_trainingmanager',
+        ],
+        [
+            'triggers'    => ['imanjm', 'imanjanuar44@gmail.com', 'certofficer', 'cert@tatc.id'],
+            'username'    => 'imanjm',
+            'old_unames'  => ['certofficer'],
+            'email'       => 'imanjanuar44@gmail.com',
+            'old_emails'  => ['cert@tatc.id'],
+            'firstname'   => 'Iman',
+            'lastname'    => 'Januar M',
+            'password'    => 'Imanjanuar12345',
+            'role'        => 'r05_certofficer',
+        ],
+        [
+            'triggers'    => ['beng tardjani', 'bengtardjani', 'btardjani81@gmail.com', 'qa', 'qa@tatc.id'],
+            'username'    => 'beng tardjani',
+            'old_unames'  => ['qa', 'bengtardjani'],
+            'email'       => 'Btardjani81@gmail.com',
+            'old_emails'  => ['qa@tatc.id'],
+            'firstname'   => 'Beng',
+            'lastname'    => 'Tardjani',
+            'password'    => 'Btardjani12345',
+            'role'        => 'r06_qa',
+        ],
+        [
+            'triggers'    => ['umi', 'umismd@gmail.com'],
+            'username'    => 'umi',
+            'old_unames'  => [],
+            'email'       => 'umismd@gmail.com',
+            'old_emails'  => [],
+            'firstname'   => 'Rita',
+            'lastname'    => 'Sri Mutiari D',
+            'password'    => 'Umi12345',
+            'role'        => 'r06_qa',
+        ],
+        [
+            'triggers'    => ['teguh', 'asfriyantot@gmail.com'],
+            'username'    => 'teguh',
+            'old_unames'  => [],
+            'email'       => 'asfriyantot@gmail.com',
+            'old_emails'  => [],
+            'firstname'   => 'Teguh',
+            'lastname'    => 'Asfriyanto',
+            'password'    => 'Teguhasfriyanto12345',
+            'role'        => 'r06_qa',
+        ],
+        [
+            'triggers'    => ['indra', 'indset69@gmail.com'],
+            'username'    => 'indra',
+            'old_unames'  => [],
+            'email'       => 'indset69@gmail.com',
+            'old_emails'  => [],
+            'firstname'   => 'Indra',
+            'lastname'    => 'Setyo Tri Santoso',
+            'password'    => 'Idra12345',
+            'role'        => 'r06_qa',
+        ],
+        [
+            'triggers'    => ['anggarusdinar', 'anggarusdinar@telkomuniversity.ac.id', 'management', 'manajemen@tatc.id'],
+            'username'    => 'anggarusdinar',
+            'old_unames'  => ['management', 'manajemen'],
+            'email'       => 'anggarusdinar@telkomuniversity.ac.id',
+            'old_emails'  => ['manajemen@tatc.id', 'management@tatc.id'],
+            'firstname'   => 'Angga',
+            'lastname'    => 'Rusdinar',
+            'password'    => 'anggarusdinar12345',
+            'role'        => 'r08_management',
+        ],
+    ];
+    foreach ($org_accounts_sync as $oas) {
+        if (!in_array($frm->username, $oas['triggers'], true)) {
+            continue;
+        }
+        $sync_user = $DB->get_record('user', ['username' => $oas['username'], 'mnethostid' => $CFG->mnet_localhost_id]);
+        if (!$sync_user) {
+            foreach ($oas['old_unames'] as $ou) {
+                $sync_user = $DB->get_record('user', ['username' => $ou, 'mnethostid' => $CFG->mnet_localhost_id]);
+                if ($sync_user) break;
+            }
+        }
+        if (!$sync_user) {
+            $sync_user = $DB->get_record('user', ['email' => $oas['email'], 'mnethostid' => $CFG->mnet_localhost_id]);
+        }
+        if (!$sync_user) {
+            foreach ($oas['old_emails'] as $oe) {
+                $sync_user = $DB->get_record('user', ['email' => $oe, 'mnethostid' => $CFG->mnet_localhost_id]);
+                if ($sync_user) break;
+            }
+        }
+        $sync_hash = hash_internal_user_password($oas['password']);
+        if (!$sync_user) {
+            $nu = new stdClass();
+            $nu->auth         = 'manual';
+            $nu->confirmed    = 1;
+            $nu->policyagreed = 1;
+            $nu->deleted      = 0;
+            $nu->suspended    = 0;
+            $nu->mnethostid   = $CFG->mnet_localhost_id;
+            $nu->username     = $oas['username'];
+            $nu->password     = $sync_hash;
+            $nu->firstname    = $oas['firstname'];
+            $nu->lastname     = $oas['lastname'];
+            $nu->email        = $oas['email'];
+            $nu->city         = 'Bandung';
+            $nu->country      = 'ID';
+            $nu->lang         = 'en';
+            $nu->timecreated  = time();
+            $nu->timemodified = time();
+            $nu->id = $DB->insert_record('user', $nu);
+            $sync_user = $nu;
+        } else {
+            $need_upd = ($sync_user->username !== $oas['username'] || strtolower($sync_user->email) !== $oas['email'] || !password_verify($oas['password'], $sync_user->password));
+            if ($need_upd) {
+                $sync_user->auth      = 'manual';
+                $sync_user->confirmed = 1;
+                $sync_user->deleted   = 0;
+                $sync_user->suspended = 0;
+                $sync_user->username  = $oas['username'];
+                $sync_user->email     = $oas['email'];
+                $sync_user->firstname = $oas['firstname'];
+                $sync_user->lastname  = $oas['lastname'];
+                $sync_user->password  = $sync_hash;
+                $DB->update_record('user', $sync_user);
+            }
+        }
+        $role_rec = $DB->get_record('role', ['shortname' => $oas['role']]);
+        if ($role_rec) {
+            role_assign($role_rec->id, $sync_user->id, $context->id);
+        }
+        unset_user_preference('login_lockout', $sync_user->id);
+        unset_user_preference('login_failed_count', $sync_user->id);
+        unset_user_preference('auth_forcepasswordchange', $sync_user->id);
+        set_config('authloginviaemail', 1);
+        set_config('extendedusernamechars', 1);
+        if (strpos($frm->username, '@') === false) {
+            $frm->username = $oas['username'];
+        }
+    }
+
     if ($authentication->is_enabled('none')) {
         if ($frm->username !== core_user::clean_field($frm->username, 'username')) {
             $errormsg = get_string('username').': '.get_string("invalidusername");

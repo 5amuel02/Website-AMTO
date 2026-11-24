@@ -53,6 +53,16 @@ if ($action === 'logout') {
     unset($_SESSION['amto_last_tatc_token']);
     setcookie('tatc_session', '', time() - 3600, '/', '', false, true);
     if (isloggedin() && !isguestuser()) {
+        // [SEC-SSO-03] LOG-01: Catat aktivitas Single Logout ke tabel Audit Trail sebelum sesi dihapus
+        if (function_exists('amto_log_audit_event')) {
+            amto_log_audit_event(
+                'SSO_LOGOUT',
+                'user',
+                (int)($USER->id ?? 0),
+                'username=' . ($USER->username ?? 'unknown'),
+                'Sesi pengguna diakhiri melalui mekanisme Single Logout SSO (LOG-01).'
+            );
+        }
         require_logout();
     }
     $raw_target = optional_param('target', '', PARAM_RAW);
@@ -95,7 +105,11 @@ if ($cookie_data && !empty($cookie_data['email'])) {
     }
 
     $_SESSION['amto_last_tatc_token'] = $_COOKIE['tatc_session'];
-    amto_login_moodle_user_from_tatc($verified_email, $verified_role, $name);
+    $logged_user = amto_login_moodle_user_from_tatc($verified_email, $verified_role, $name);
+    if (!$logged_user) {
+        header('Location: http://localhost:5173/portal/participant/registration?lms_status=unregistered');
+        exit;
+    }
 } else if (!isloggedin() || isguestuser()) {
     // Tidak memiliki token HMAC tatc_session yang valid dan belum login di Moodle: blokir bypass URL
     if ($req_email !== '' && function_exists('amto_log_audit_event')) {

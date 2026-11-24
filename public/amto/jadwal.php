@@ -16,7 +16,8 @@ $rbac_role = amto_current_rbac_role();
 $can_manage_sched = in_array($rbac_role, ['admin', 'trainingmanager'], true);
 $action = optional_param('action', '', PARAM_ALPHANUMEXT);
 $cat_filter = optional_param('cat', 'all', PARAM_TEXT);
-$notice_msg = '';
+$msg = optional_param('msg', '', PARAM_TEXT);
+$notice_msg = $msg !== '' ? s($msg) : '';
 $notice_type = 'success';
 
 // 1. Handle Admin Actions: Add Schedule / Update Status / Soft-Delete (Void) Schedule
@@ -40,6 +41,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage_sched) {
         $rec->timecreated = time();
 
         if ($rec->batch_code !== '' && $rec->program_name !== '') {
+            // Prevent duplicate active batch_code
+            $existing_sched = $DB->get_record_select(
+                'amto_schedules',
+                'LOWER(batch_code) = LOWER(:bc) AND LOWER(status) NOT IN (\'void\', \'voided\')',
+                ['bc' => $rec->batch_code],
+                '*',
+                IGNORE_MULTIPLE
+            );
+            if ($existing_sched) {
+                $m = "Jadwal dengan Kode Batch {$rec->batch_code} sudah terdaftar.";
+                header('Location: /amto/jadwal.php?msg=' . urlencode($m));
+                exit;
+            }
+
             $new_sched_id = $DB->insert_record('amto_schedules', $rec);
             if (function_exists('amto_sync_cross_db')) {
                 amto_sync_cross_db(true);
@@ -65,10 +80,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage_sched) {
             $ev->timemodified = time();
             $DB->insert_record('event', $ev);
 
-            // [SEC-FIX-06] APP-01 Output encoding with s() to prevent Cross-Site Scripting (XSS)
-            $safe_batch = s($rec->batch_code);
-            $safe_prog  = s($rec->program_name);
-            $notice_msg = "Jadwal Pelatihan <strong>{$safe_batch} – {$safe_prog}</strong> berhasil ditambahkan dan disinkronkan ke Kalender Moodle.";
+            $m = "Jadwal Pelatihan {$rec->batch_code} – {$rec->program_name} berhasil ditambahkan dan disinkronkan ke Kalender Moodle.";
+            header('Location: /amto/jadwal.php?msg=' . urlencode($m));
+            exit;
         } else {
             $notice_msg = 'Mohon isi Kode Batch dan Nama Program Pelatihan.';
             $notice_type = 'danger';
@@ -84,10 +98,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage_sched) {
             if (function_exists('amto_log_audit_event')) {
                 amto_log_audit_event('SCHEDULE_STATUS_UPDATE', 'amto_schedules', $sched_id, "status: {$old_st} -> {$new_status}", "Updated batch {$sched->batch_code} status");
             }
-            // [SEC-FIX-06] APP-01 Output encoding with s() to prevent Cross-Site Scripting (XSS)
-            $safe_batch  = s($sched->batch_code);
-            $safe_status = s($new_status);
-            $notice_msg  = "Status jadwal <strong>{$safe_batch}</strong> diperbarui menjadi <strong>{$safe_status}</strong>.";
+            $m = "Status jadwal {$sched->batch_code} diperbarui menjadi {$new_status}.";
+            header('Location: /amto/jadwal.php?msg=' . urlencode($m));
+            exit;
         }
     } else if ($action === 'delete_schedule') {
         $sched_id = required_param('sched_id', PARAM_INT);
@@ -100,12 +113,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage_sched) {
                 amto_log_audit_event('SCHEDULE_VOID', 'amto_schedules', $sched_id, 'status=Voided', 'Schedule voided by ' . fullname($USER));
             }
         }
-        $notice_msg = 'Jadwal pelatihan telah ditandai VOID (Soft-Delete SEC-05) tanpa menghapus jejak histori.';
-        $notice_type = 'warning';
+        $m = 'Jadwal pelatihan telah dihapus (ditandai VOID sesuai SEC-05).';
+        header('Location: /amto/jadwal.php?msg=' . urlencode($m));
+        exit;
     }
 }
 
-$schedules = $DB->get_records('amto_schedules', null, 'start_date ASC');
+$raw_schedules = $DB->get_records('amto_schedules', null, 'start_date ASC');
+$schedules = [];
+foreach ($raw_schedules as $rs) {
+    if (in_array(strtolower((string)$rs->status), ['void', 'voided'], true)) {
+        continue;
+    }
+    $schedules[$rs->id] = $rs;
+}
 $total_schedules = count($schedules);
 $open_schedules = 0;
 $ongoing_schedules = 0;
@@ -321,7 +342,11 @@ echo amto_render_shared_styles();
                         if ($cat_filter !== 'all' && $s->category_type !== $cat_filter) {
                             continue;
                         }
-                        $reg_count = $DB->count_records('amto_registrations', ['schedule_id' => $s->id]);
+                        $reg_count = $DB->count_records_select(
+                            'amto_registrations',
+                            "schedule_id = :sid AND LOWER(status) NOT IN ('void', 'voided', 'rejected')",
+                            ['sid' => $s->id]
+                        );
                         $is_my_batch = false;
                         if ($role === 'student' && isloggedin() && !isguestuser()) {
                             $is_my_batch = $DB->record_exists_select(
@@ -366,8 +391,11 @@ echo amto_render_shared_styles();
                             <td>
                                 <?php if ($role === 'admin'): ?>
                                     <div class="d-flex flex-wrap gap-1">
+                                        <a href="/amto/repository.php?class_id=<?php echo (int)$s->id; ?>" class="tatc-btn-red" style="padding:6px 10px; font-size:12px;">
+                                            Kelola Silabus &amp; Materi
+                                        </a>
                                         <a href="/amto/registrasi.php?batch=<?php echo urlencode($s->batch_code); ?>" class="tatc-btn-outline" style="padding:6px 10px; font-size:12px;">
-                                            Lihat Pendaftar (<?php echo $reg_count; ?>)
+                                            Pendaftar (<?php echo $reg_count; ?>)
                                         </a>
                                         <form method="post" action="/amto/jadwal.php" style="display:inline;" onsubmit="return confirm('Hapus jadwal batch ini?');">
                                             <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
@@ -377,19 +405,17 @@ echo amto_render_shared_styles();
                                         </form>
                                     </div>
                                 <?php elseif ($role === 'instructor'): ?>
-                                    <a href="/course/index.php" class="tatc-btn-outline" style="padding:6px 12px; font-size:12px;">
-                                        Buka Materi Kelas
+                                    <a href="/amto/repository.php?class_id=<?php echo (int)$s->id; ?>" class="tatc-btn-red" style="padding:6px 12px; font-size:12px;">
+                                        Kelola Silabus &amp; Materi
                                     </a>
                                 <?php elseif ($role === 'student' && isloggedin() && !isguestuser()): ?>
-                                    <?php if ($is_my_batch): ?>
-                                        <span class="tatc-badge tatc-badge-approved">Batch Pelatihan Saya</span>
-                                    <?php else: ?>
-                                        <span style="font-size:12px; color:#64748b;">Jadwal Batch Lain</span>
-                                    <?php endif; ?>
+                                    <a href="/amto/repository.php?class_id=<?php echo (int)$s->id; ?>" class="tatc-btn-red" style="padding:7px 14px; font-size:12.5px;">
+                                        Buka Kelas &amp; Silabus &rarr;
+                                    </a>
                                 <?php else: ?>
                                     <?php if ($s->status === 'Open Registration'): ?>
                                         <a href="/amto/registrasi.php?schedule_id=<?php echo $s->id; ?>" class="tatc-btn-red" style="padding:7px 14px; font-size:12.5px;">
-                                            Daftar Batch Ini
+                                            Daftar &amp; Cek Eligibility
                                         </a>
                                     <?php else: ?>
                                         <span style="font-size:12px; color:#94a3b8; font-weight:600;">Pendaftaran Tutup</span>

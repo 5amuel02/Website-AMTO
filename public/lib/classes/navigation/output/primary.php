@@ -277,36 +277,35 @@ class primary implements renderable, templatable {
         $role = function_exists('amto_get_effective_role') ? amto_get_effective_role() : 'admin';
 
         if ($role === 'student') {
-            $custommenuitems = "Jadwal & Data Peserta|/amto/jadwal.php\n"
-                . "-Jadwal Pelatihan & Batch Saya|/amto/jadwal.php\n"
-                . "-Data & Berkas Registrasi Saya|/amto/registrasi.php\n"
-                . "-Kalender Pelatihan Bulanan|/calendar/view.php?view=month\n"
-                . "Kelas & Materi Saya|/my/courses.php\n"
-                . "-Kelas Pelatihan Saya|/my/courses.php\n"
-                . "-Katalog Repository Modul AMTO|/amto/repository.php\n"
-                . "Ujian & Logbook|/grade/report/overview/index.php\n"
-                . "-Daftar Ujian Aktif|/my/courses.php\n"
-                . "-Practical Logbook Saya|/grade/report/overview/index.php\n"
-                . "-Hasil Assessment Saya|/grade/report/overview/index.php\n"
-                . "Sertifikat Saya|/badges/mybadges.php\n"
-                . "-Status Sertifikasi Saya|/badges/mybadges.php\n"
-                . "-Profil Peserta|/user/profile.php";
+            $custommenuitems = "Jadwal Pelatihan|/amto/jadwal.php\n"
+                . "Kelas & Materi Saya|/amto/repository.php\n"
+                . "Ujian & Logbook|/amto/ujian_logbook.php\n"
+                . "-Daftar Quiz & Ujian CBT|/amto/ujian_logbook.php?tab=ujian\n"
+                . "-Assignment & Penugasan Kelas|/amto/ujian_logbook.php?tab=assignment\n"
+                . "-Practical Logbook Hangar Saya|/amto/ujian_logbook.php?tab=logbook\n"
+                . "-Hasil Assessment & Transkrip Nilai|/amto/ujian_logbook.php?tab=hasil\n"
+                . "Sertifikat Saya|/amto/sertifikat.php";
         } else if ($role === 'instructor') {
             $custommenuitems = "Kelas & Jadwal Mengajar|/amto/jadwal.php\n"
                 . "-Jadwal Mengajar & Ruangan (AMTO)|/amto/jadwal.php\n"
-                . "-Daftar Kelas Mengajar|/my/courses.php\n"
                 . "-Kalender Jadwal Mengajar|/calendar/view.php?view=month\n"
-                . "Materi & Presensi|/course/index.php\n"
-                . "-Kelola Materi Kelas (Repository LMS)|/course/index.php\n"
-                . "-Input & Koreksi Presensi|/course/index.php\n"
-                . "Ujian & Assessment|/question/edit.php?courseid=1\n"
-                . "-Bank Soal & Ujian|/question/edit.php?courseid=1\n"
-                . "-Input Nilai Assessment|/grade/report/overview/index.php\n"
-                . "Verifikasi Logbook|/grade/report/overview/index.php\n"
-                . "-Antrean Practical Logbook Peserta|/grade/report/overview/index.php\n"
-                . "-Validasi Bukti Kompetensi|/admin/tool/lp/competencyframeworks.php?pagecontextid=1";
+                . "Materi & Repository|/amto/repository.php\n"
+                . "-Kelola & Unggah Modul Materi (Repository LMS)|/amto/repository.php\n"
+                . "Ujian & Assessment|/amto/ujian_logbook.php?tab=ujian\n"
+                . "-Bank Ujian & Jadwal CBT|/amto/ujian_logbook.php?tab=ujian\n"
+                . "-Input & Evaluasi Nilai Assessment Peserta|/amto/ujian_logbook.php?tab=hasil\n"
+                . "Verifikasi Logbook|/amto/ujian_logbook.php?tab=logbook\n"
+                . "-Antrean Practical Logbook Hangar Peserta|/amto/ujian_logbook.php?tab=logbook\n"
+                . "-Daftar E-Sertifikat Kompetensi AMTO|/amto/sertifikat.php";
         } else {
             $custommenuitems = $CFG->custommenuitems ?? '';
+            if (stripos($custommenuitems, '/amto/ujian_logbook.php') === false) {
+                $custommenuitems = trim($custommenuitems) . "\nUjian, Logbook & Sertifikat|/amto/ujian_logbook.php\n"
+                    . "-Manajemen Ujian & CBT (CASR 147)|/amto/ujian_logbook.php?tab=ujian\n"
+                    . "-Verifikasi Practical Logbook Hangar|/amto/ujian_logbook.php?tab=logbook\n"
+                    . "-Rekap Nilai Assessment Peserta|/amto/ujian_logbook.php?tab=hasil\n"
+                    . "-Penerbitan E-Sertifikat AMTO (147D-19)|/amto/sertifikat.php";
+            }
             if (stripos($custommenuitems, '/amto/audit_log.php') === false) {
                 $custommenuitems = trim($custommenuitems) . "\nSecurity & Audit Trail|/amto/audit_log.php\n"
                     . "-Matriks 8 Role RBAC & 15 Security UAT|/amto/audit_log.php\n"

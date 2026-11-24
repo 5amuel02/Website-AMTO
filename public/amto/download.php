@@ -56,8 +56,21 @@ if ($type === 'reg') {
     }
 
     $filename = basename($rel_path);
-    $fullpath = __DIR__ . '/uploads/' . $filename;
-    if (!is_file($fullpath)) {
+    $candidate_paths = [
+        __DIR__ . '/uploads/' . $filename,
+        'C:/Users/Asus Tuf Gaming/tatcwebreact/backend/public/documents/' . $filename,
+        'C:/Users/Asus Tuf Gaming/tatcwebreact/public/documents/' . $filename,
+        __DIR__ . '/../../tatcwebreact/backend/public/documents/' . $filename,
+        __DIR__ . '/../../tatcwebreact/public/documents/' . $filename,
+    ];
+    $fullpath = '';
+    foreach ($candidate_paths as $cand) {
+        if (is_file($cand)) {
+            $fullpath = $cand;
+            break;
+        }
+    }
+    if ($fullpath === '') {
         http_response_code(404);
         throw new moodle_exception('filenotfound', 'error');
     }
@@ -113,6 +126,51 @@ if ($type === 'reg') {
         finfo_close($finfo);
     }
 
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: SAMEORIGIN');
+    header('Cache-Control: private, max-age=300');
+    header('Content-Type: ' . $mime);
+    header('Content-Length: ' . filesize($fullpath));
+    header('Content-Disposition: inline; filename="' . rawurlencode($filename) . '"');
+    readfile($fullpath);
+    exit;
+} else if (in_array($type, ['quizimg', 'assign', 'assignsub'], true)) {
+    $rel_path = '';
+    if ($type === 'quizimg') {
+        $q = $DB->get_record('amto_exam_questions', ['id' => $id]);
+        $rel_path = $q->image_path ?? '';
+    } else if ($type === 'assign') {
+        $a = $DB->get_record('amto_assignments', ['id' => $id]);
+        $rel_path = $a->attachment_path ?? '';
+    } else if ($type === 'assignsub') {
+        $s = $DB->get_record('amto_assignment_submissions', ['id' => $id]);
+        $rel_path = $s->file_path ?? '';
+    }
+    if (empty($rel_path)) {
+        http_response_code(404);
+        throw new moodle_exception('filenotfound', 'error');
+    }
+    $filename = basename($rel_path);
+    $candidates = [
+        __DIR__ . '/repository_files/' . $filename,
+        __DIR__ . '/uploads/' . $filename,
+    ];
+    $fullpath = '';
+    foreach ($candidates as $c) {
+        if (is_file($c)) {
+            $fullpath = $c;
+            break;
+        }
+    }
+    if ($fullpath === '') {
+        http_response_code(404);
+        throw new moodle_exception('filenotfound', 'error');
+    }
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = $finfo ? finfo_file($finfo, $fullpath) : 'application/octet-stream';
+    if ($finfo) {
+        finfo_close($finfo);
+    }
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: SAMEORIGIN');
     header('Cache-Control: private, max-age=300');

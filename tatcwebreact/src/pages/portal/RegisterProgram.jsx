@@ -110,7 +110,22 @@ const RegisterProgram = () => {
 
       <form onSubmit={handleSubmit} style={{ background: 'var(--surface-color)', padding: '2rem', borderRadius: '16px', border: '1px solid var(--border-color)', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
         {fields.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>Formulir pendaftaran untuk program ini belum dikonfigurasi oleh admin. Silakan coba lagi nanti.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div style={{ padding: '1rem 1.25rem', background: 'rgba(220, 38, 38, 0.06)', border: '1px solid rgba(220, 38, 38, 0.2)', borderRadius: '12px', color: 'var(--text-main)', fontSize: '0.92rem' }}>
+              <strong>Konfirmasi Pendaftaran Peserta TATC – AMTO (CASR Part 147)</strong>
+              <div style={{ color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                Data profil akun Anda (<strong>{user?.profile?.full_name || user?.name || user?.email}</strong> — <code>{user?.email}</code>) akan otomatis digunakan untuk pengajuan pendaftaran program ini. Setelah disubmit, Anda dapat memantau status verifikasi (<em>Sedang Diverifikasi Admin / Diterima / Perlu Revisi</em>) langsung di Dashboard Portal Peserta TATC.
+              </div>
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', color: 'var(--text-main)' }}>Instansi / Maskapai / Universitas Asal</label>
+              <input type="text" placeholder="Contoh: Telkom University / PT Dirgantara Indonesia / Umum" value={formData.notes_instansi || ''} onChange={e => setFormData({ ...formData, notes_instansi: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--background-main)', color: 'var(--text-main)' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', color: 'var(--text-main)' }}>Nomor Lisensi AMEL / Catatan Prasyarat (Opsional)</label>
+              <input type="text" placeholder="Kosongkan jika mendaftar Basic License baru" value={formData.notes_amel || ''} onChange={e => setFormData({ ...formData, notes_amel: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--background-main)', color: 'var(--text-main)' }} />
+            </div>
+          </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {fields.map(field => {
@@ -172,14 +187,12 @@ const RegisterProgram = () => {
           </div>
         )}
 
-        {fields.length > 0 && (
-          <div style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
-            <button type="button" onClick={() => navigate('/')} style={{ padding: '12px 24px', background: 'transparent', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', color: 'var(--text-main)', fontWeight: '600' }}>Batal</button>
-            <button type="submit" disabled={submitting} className="btn btn-primary" style={{ padding: '12px 32px', borderRadius: '8px', fontSize: '1rem' }}>
-              {submitting ? 'Memproses...' : 'Submit Pendaftaran'}
-            </button>
-          </div>
-        )}
+        <div style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+          <button type="button" onClick={() => navigate('/portal/participant')} style={{ padding: '12px 24px', background: 'transparent', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', color: 'var(--text-main)', fontWeight: '600' }}>Batal</button>
+          <button type="submit" disabled={submitting} className="btn btn-primary" style={{ padding: '12px 32px', borderRadius: '8px', fontSize: '1rem' }}>
+            {submitting ? 'Memproses...' : 'Submit Pendaftaran Program'}
+          </button>
+        </div>
       </form>
     </div>
   );

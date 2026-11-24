@@ -2,9 +2,9 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { db } from '../../../lib/db.js';
-import { body, fail, ok } from '../../../lib/http.js';
+import { body, buildCorsHeaders, fail, ok, SECURITY_HEADERS } from '../../../lib/http.js';
 import { clearSession, getSession, requireAuth, setSession } from '../../../lib/auth.js';
-import { ADMIN_ROLES, TABLES } from '../../../lib/tables.js';
+import { ADMIN_ROLES, READ_ONLY_ADMIN_EMAILS, READ_ONLY_ADMIN_ROLES, TABLES } from '../../../lib/tables.js';
 import { saveFile } from '../../../lib/upload.js';
 import { checkRateLimit, getClientIp } from '../../../lib/rateLimit.js';
 
@@ -16,8 +16,85 @@ async function tableColumns(table) {
 }
 
 function normalizeRole(role) {
-  const map = { SUPER_ADMIN: 'SUPERADMIN', SUPERADMIN: 'SUPERADMIN', ADMIN: 'ADMIN', INSTRUCTOR: 'INSTRUKTUR', INSTRUKTUR: 'INSTRUKTUR', PARTICIPANT: 'PESERTA', PESERTA: 'PESERTA' };
+  const map = {
+    SUPER_ADMIN: 'SUPERADMIN',
+    SUPERADMIN: 'SUPERADMIN',
+    ADMIN: 'ADMIN',
+    QA: 'ADMIN',
+    R06_QA: 'ADMIN',
+    MANAGEMENT: 'ADMIN',
+    MANAJEMEN: 'ADMIN',
+    R08_MANAGEMENT: 'ADMIN',
+    TRAININGMANAGER: 'ADMIN',
+    R04_TM: 'ADMIN',
+    CERTOFFICER: 'ADMIN',
+    R05_CERT: 'ADMIN',
+    INSTRUCTOR: 'INSTRUKTUR',
+    INSTRUKTUR: 'INSTRUKTUR',
+    ASSESSOR: 'INSTRUKTUR',
+    R03_ASSESSOR: 'INSTRUKTUR',
+    PARTICIPANT: 'PESERTA',
+    PESERTA: 'PESERTA',
+  };
   return map[String(role || '').toUpperCase()] || 'PESERTA';
+}
+
+function resolveAmtoRole(subject) {
+  if (!subject) return 'R01_PESERTA';
+  const email = String(subject.email || '').trim().toLowerCase();
+  const rawRole = String(subject.amto_role || subject.resolved_role?.split(',')[0] || subject.role || '').trim().toUpperCase();
+
+  if (['btardjani81@gmail.com', 'qa@tatc.id', 'umismd@gmail.com', 'asfriyantot@gmail.com', 'indset69@gmail.com'].includes(email) || ['QA', 'R06_QA'].includes(rawRole)) return 'R06_QA';
+  if (['anggarusdinar@telkomuniversity.ac.id', 'manajemen@tatc.id', 'management@tatc.id'].includes(email) || ['MANAGEMENT', 'MANAJEMEN', 'R08_MANAGEMENT'].includes(rawRole)) return 'R08_MANAGEMENT';
+  if (['emacdef@telkomuniversity.ac.id', 'juhandi@gmail.com', 'tm@tatc.id'].includes(email) || ['TRAININGMANAGER', 'R04_TM'].includes(rawRole)) return 'R04_TM';
+  if (['imanjanuar44@gmail.com', 'cert@tatc.id'].includes(email) || ['CERTOFFICER', 'R05_CERT'].includes(rawRole)) return 'R05_CERT';
+  if (email === 'assessor@tatc.id' || ['ASSESSOR', 'R03_ASSESSOR'].includes(rawRole)) return 'R03_ASSESSOR';
+  if (email === 'admin@tatc.id' || ['SUPERADMIN', 'SUPER_ADMIN', 'R07_ADMIN_IT'].includes(rawRole)) return 'R07_ADMIN_IT';
+  if (normalizeRole(rawRole) === 'ADMIN') return 'R04_TM';
+  if (normalizeRole(rawRole) === 'INSTRUKTUR') return 'R02_INSTRUKTUR';
+  return 'R01_PESERTA';
+}
+
+function isReadOnlyAuditSession(subject) {
+  if (!subject) return false;
+  if (subject.read_only_audit === true) return true;
+  const email = String(subject.email || '').trim().toLowerCase();
+  const rawRole = String(subject.amto_role || subject.role || '').trim().toUpperCase();
+  return READ_ONLY_ADMIN_EMAILS.includes(email) || READ_ONLY_ADMIN_ROLES.includes(rawRole);
+}
+
+function maskNik(nik) {
+  const clean = String(nik || '').trim();
+  if (clean.length <= 6) return '*'.repeat(Math.max(4, clean.length));
+  return clean.slice(0, 4) + '*'.repeat(clean.length - 7) + clean.slice(-3);
+}
+
+function maskPhone(phone) {
+  const clean = String(phone || '').trim();
+  if (clean.length <= 5) return '*'.repeat(Math.max(4, clean.length));
+  return clean.slice(0, 4) + '*'.repeat(clean.length - 6) + clean.slice(-2);
+}
+
+function maskEmail(email) {
+  const parts = String(email || '').trim().split('@');
+  if (parts.length !== 2) return '***';
+  const [local, domain] = parts;
+  return local.slice(0, Math.min(2, local.length)) + '***@' + domain;
+}
+
+/**
+ * Penegakan Kebijakan Keamanan SCP-06 (Quality Assurance Read-Only Audit) &
+ * SCP-07 (Manajemen Read-Only Executive): mencegah operasi tulis/mutasi data (POST/PUT/DELETE).
+ */
+function assertNotReadOnlyAdmin(session) {
+  if (isReadOnlyAuditSession(session)) {
+    const amtoRole = resolveAmtoRole(session);
+    const label = amtoRole === 'R06_QA' ? 'Quality Assurance (R06 - SCP-06)' : 'Manajemen (R08 - SCP-07)';
+    throw {
+      message: `Akses Ditolak (${label}): Akun ini bersifat Read-Only Audit dan tidak diizinkan menambah, mengubah, menyetujui, atau menghapus data operasional.`,
+      status: 403,
+    };
+  }
 }
 
 function hasStrongPassword(password) {
@@ -28,17 +105,75 @@ function hasStrongPassword(password) {
     && /[^A-Za-z0-9\s]/.test(password);
 }
 
-async function findUserByEmail(email) {
+const USERNAME_TO_EMAIL_MAP = {
+  peserta: 'peserta@tatc.id',
+  instruktur: 'instruktur@tatc.id',
+  assessor: 'assessor@tatc.id',
+  ema: 'emacdef@telkomuniversity.ac.id',
+  juhandi: 'juhandi@gmail.com',
+  trainingmanager: 'juhandi@gmail.com',
+  tm: 'juhandi@gmail.com',
+  'tm@tatc.id': 'juhandi@gmail.com',
+  imanjm: 'imanjanuar44@gmail.com',
+  certofficer: 'imanjanuar44@gmail.com',
+  'cert@tatc.id': 'imanjanuar44@gmail.com',
+  'beng tardjani': 'btardjani81@gmail.com',
+  bengtardjani: 'btardjani81@gmail.com',
+  qa: 'btardjani81@gmail.com',
+  'qa@tatc.id': 'btardjani81@gmail.com',
+  umi: 'umismd@gmail.com',
+  teguh: 'asfriyantot@gmail.com',
+  indra: 'indset69@gmail.com',
+  admin: 'admin@tatc.id',
+  anggarusdinar: 'anggarusdinar@telkomuniversity.ac.id',
+  management: 'anggarusdinar@telkomuniversity.ac.id',
+  manajemen: 'anggarusdinar@telkomuniversity.ac.id',
+  'manajemen@tatc.id': 'anggarusdinar@telkomuniversity.ac.id',
+};
+
+const OFFICIAL_TATC_AUTO_PROVISION = {
+  'emacdef@telkomuniversity.ac.id': { pass: 'emacdef12345', role: 'ADMIN' },
+  'juhandi@gmail.com': { pass: 'Juhandi12345', role: 'ADMIN', oldEmail: 'tm@tatc.id' },
+  'imanjanuar44@gmail.com': { pass: 'Imanjanuar12345', role: 'ADMIN', oldEmail: 'cert@tatc.id' },
+  'btardjani81@gmail.com': { pass: 'Btardjani12345', role: 'ADMIN', oldEmail: 'qa@tatc.id' },
+  'umismd@gmail.com': { pass: 'Umi12345', role: 'ADMIN' },
+  'asfriyantot@gmail.com': { pass: 'Teguhasfriyanto12345', role: 'ADMIN' },
+  'indset69@gmail.com': { pass: 'Idra12345', role: 'ADMIN' },
+  'anggarusdinar@telkomuniversity.ac.id': { pass: 'anggarusdinar12345', role: 'ADMIN', oldEmail: 'manajemen@tatc.id' },
+};
+
+async function findUserByEmail(emailOrUsername) {
   const pool = connection();
+  const raw = String(emailOrUsername || '').trim().toLowerCase();
+  const email = USERNAME_TO_EMAIL_MAP[raw] || raw;
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ? LIMIT 1', [email]);
+    let [rows] = await pool.query('SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1', [email]);
+    if (!rows[0] && OFFICIAL_TATC_AUTO_PROVISION[email]) {
+      const cfg = OFFICIAL_TATC_AUTO_PROVISION[email];
+      const hash = await bcrypt.hash(cfg.pass, 10);
+      if (cfg.oldEmail) {
+        await pool.query(
+          `UPDATE users SET email = ?, password_hash = ?, role = ?, status = 'ACTIVE' WHERE LOWER(email) = ?`,
+          [email, hash, cfg.role, cfg.oldEmail]
+        ).catch(() => {});
+        [rows] = await pool.query('SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1', [email]);
+      }
+      if (!rows[0]) {
+        await pool.query(
+          `INSERT INTO users (email, password_hash, role, status, email_verified_at, created_at, updated_at)
+           VALUES (?, ?, ?, 'ACTIVE', NOW(), NOW(), NOW())`,
+          [email, hash, cfg.role]
+        ).catch(() => {});
+        [rows] = await pool.query('SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1', [email]);
+      }
+    }
     if (!rows[0]) return null;
     return rows[0];
   } catch {
     try {
       const [rows] = await pool.query(`SELECT u.*, GROUP_CONCAT(r.code ORDER BY r.code SEPARATOR ',') AS resolved_role
         FROM users u LEFT JOIN user_roles ur ON ur.user_id=u.id LEFT JOIN roles r ON r.id=ur.role_id
-        WHERE u.email=? GROUP BY u.id LIMIT 1`, [email]);
+        WHERE LOWER(u.email)=? GROUP BY u.id LIMIT 1`, [email]);
       return rows[0] || null;
     } catch {
       return null;
@@ -84,7 +219,9 @@ async function login(request) {
   const role = normalizeRole(user.role || user.resolved_role?.split(',')[0]);
   if (role === 'PESERTA' && 'email_verified_at' in user && !user.email_verified_at) return fail('Silakan verifikasi email terlebih dahulu.', 403);
   if ('last_login_at' in user) await connection().query('UPDATE users SET last_login_at=NOW(), failed_login_attempts=0, lockout_until=NULL WHERE id=?', [user.id]);
-  const safe = { id: user.id, email: user.email, role, status: user.status, name: user.name || null };
+  const amtoRole = resolveAmtoRole(user);
+  const readOnlyAudit = isReadOnlyAuditSession(user);
+  const safe = { id: user.id, email: user.email, role, amto_role: amtoRole, read_only_audit: readOnlyAudit, status: user.status, name: user.name || null };
   await setSession(safe);
   return ok({ user: safe, profile: await profileFor(user) }, 'Login berhasil.');
 }
@@ -109,6 +246,9 @@ async function generic(path, request, params) {
   let session = null;
   if (!isPublicCms) {
     session = await requireAuth(ADMIN_ROLES);
+    if (method !== 'GET') {
+      assertNotReadOnlyAdmin(session);
+    }
   }
   const pool = connection();
   const cols = await tableColumns(table);
@@ -220,11 +360,13 @@ async function generic(path, request, params) {
 
     if (method === 'DELETE') {
       if (!id) return fail('ID wajib diisi.', 422);
-      // Remove child records first to avoid FK constraint errors
-      await pool.query('DELETE FROM attendance WHERE session_id=?', [id]);
-      await pool.query('DELETE FROM session_instructors WHERE session_id=?', [id]);
-      await pool.query('DELETE FROM sessions WHERE id=?', [id]);
-      return ok(null, 'Sesi berhasil dihapus.');
+      // SEC-05: Larangan Hard-Delete pada rekam presensi & sesi akademik — gunakan Soft-Delete / Void (status = 'CANCELLED')
+      if (cols.has('deleted_at')) {
+        await pool.query("UPDATE sessions SET status='CANCELLED', deleted_at=NOW() WHERE id=?", [id]);
+      } else {
+        await pool.query("UPDATE sessions SET status='CANCELLED' WHERE id=?", [id]);
+      }
+      return ok({ id, status: 'CANCELLED' }, 'Sesi berhasil dibatalkan (Soft-Delete / Void SEC-05) tanpa menghapus rekam histori presensi.');
     }
   }
 
@@ -368,9 +510,28 @@ async function generic(path, request, params) {
 
   if (method === 'DELETE') {
     if (!id) return fail('ID wajib diisi.', 422);
-    if (cols.has('deleted_at')) await pool.query(`UPDATE \`${table}\` SET deleted_at=NOW()${cols.has('status') ? ", status='INACTIVE'" : ''} WHERE id=?`, [id]);
-    else await pool.query(`DELETE FROM \`${table}\` WHERE id=?`, [id]);
-    return ok(null, 'Data berhasil dihapus.');
+    // SEC-05: Perlindungan integritas rekam akademik & sertifikasi dari penghapusan permanen (Hard-Delete)
+    if (path === 'certificates') {
+      await pool.query("UPDATE `certificates` SET status='REVOKED' WHERE id=?", [id]);
+      return ok({ id, status: 'REVOKED' }, 'Sertifikat berhasil dicabut/dibatalkan (REVOKED - SEC-05).');
+    }
+    if (path === 'exam_results') {
+      return fail('Penghapusan permanen nilai ujian dilarang berdasarkan kebijakan integritas akademik (SEC-05).', 403);
+    }
+    if (path === 'exams') {
+      const [resCount] = await pool.query('SELECT COUNT(*) AS total FROM exam_results WHERE exam_id=?', [id]);
+      if (Number(resCount[0]?.total || 0) > 0 && !cols.has('deleted_at')) {
+        return fail('Ujian yang telah memiliki rekam nilai peserta tidak dapat dihapus permanen (SEC-05).', 409);
+      }
+    }
+    if (cols.has('deleted_at')) {
+      await pool.query(`UPDATE \`${table}\` SET deleted_at=NOW()${cols.has('status') ? ", status='INACTIVE'" : ''} WHERE id=?`, [id]);
+    } else if (cols.has('status')) {
+      await pool.query(`UPDATE \`${table}\` SET status='INACTIVE' WHERE id=?`, [id]);
+    } else {
+      await pool.query(`DELETE FROM \`${table}\` WHERE id=?`, [id]);
+    }
+    return ok(null, 'Data berhasil dinonaktifkan/dihapus sesuai kebijakan Soft-Delete (SEC-05).');
   }
   return fail('Method tidak didukung.', 405);
 }
@@ -607,7 +768,8 @@ async function verifyCertificate(params) {
 
 
 async function importCsv(route, request) {
-  await requireAuth(ADMIN_ROLES);
+  const session = await requireAuth(ADMIN_ROLES);
+  assertNotReadOnlyAdmin(session);
   const form = await request.formData();
   const file = form.get('file');
   if (!file || typeof file.text !== 'function') return fail('File CSV wajib dipilih.', 422);
@@ -691,7 +853,7 @@ async function portal(route, request, params) {
              p.id as program_id, p.code as program_code, p.name as program_name, p.description, p.requirements
       FROM batches b
       JOIN programs p ON p.id = b.program_id
-      WHERE b.status = 'ACTIVE' AND b.deleted_at IS NULL AND p.deleted_at IS NULL
+      WHERE b.status IN ('ACTIVE', 'OPEN', 'PLANNED') AND b.deleted_at IS NULL AND p.deleted_at IS NULL
         AND b.id NOT IN (SELECT batch_id FROM batch_participants WHERE participant_id=?)
       ORDER BY b.start_date DESC, b.created_at DESC
     `, [participantId]).catch(() => [[]]);
@@ -710,6 +872,7 @@ async function portal(route, request, params) {
       if (!['SUPERADMIN', 'ADMIN', 'INSTRUKTUR'].includes(session.role)) {
         return fail('Hanya instruktur atau admin yang berhak mencatat presensi.', 403);
       }
+      assertNotReadOnlyAdmin(session);
       const data = await body(request); const items = Array.isArray(data.attendances) ? data.attendances : [];
       const sessionId = Number(data.session_id || 0);
       for (const item of items) await pool.query(`INSERT INTO attendance(session_id,participant_id,status,notes,recorded_by) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE status=VALUES(status),notes=VALUES(notes),recorded_by=VALUES(recorded_by)`, [sessionId, item.participant_id, item.status, item.notes || null, session.id]);
@@ -931,7 +1094,19 @@ async function portal(route, request, params) {
 export async function GET(request, context) {
   try {
     const { path = [] } = await context.params; const route = path.join('/'); const params = new URL(request.url).searchParams;
-    if (route === 'auth/me') { const session = await getSession(); if (!session) return fail('Unauthorized', 401); const user = await findUserByEmail(session.email); return ok({ ...session, role: normalizeRole(user?.role || user?.resolved_role?.split(',')[0] || session.role), profile: user ? await profileFor(user) : null }); }
+    if (route === 'auth/me') {
+      const session = await getSession();
+      if (!session) return fail('Unauthorized', 401);
+      const user = await findUserByEmail(session.email);
+      const subject = user || session;
+      return ok({
+        ...session,
+        role: normalizeRole(user?.role || user?.resolved_role?.split(',')[0] || session.role),
+        amto_role: resolveAmtoRole(subject),
+        read_only_audit: isReadOnlyAuditSession(subject),
+        profile: user ? await profileFor(user) : null,
+      });
+    }
     if (route === 'dashboard/stats') return await dashboard();
     if (route === 'public/open-programs') {
       const pool = connection();
@@ -940,7 +1115,7 @@ export async function GET(request, context) {
                p.id as program_id, p.code as program_code, p.name as program_name, p.description, p.requirements
         FROM batches b
         JOIN programs p ON p.id = b.program_id
-        WHERE b.status = 'ACTIVE' AND b.deleted_at IS NULL AND p.deleted_at IS NULL
+        WHERE b.status IN ('ACTIVE', 'OPEN', 'PLANNED') AND b.deleted_at IS NULL AND p.deleted_at IS NULL
         ORDER BY b.start_date DESC, b.created_at DESC
       `);
       return ok(rows);
@@ -1167,6 +1342,80 @@ export async function GET(request, context) {
       return ok(rows);
     }
 
+    if (route === 'portal/amto-registration') {
+      const session = await getSession();
+      if (!session) return fail('Unauthorized', 401);
+      const pool = connection();
+      const q = (params.get('q') || '').trim();
+      const [schedules] = await pool.query(
+        `SELECT id, batch_code, program_name, start_date, end_date, room_location, status
+           FROM moodle.mdl_amto_schedules
+          WHERE LOWER(status) NOT IN ('void', 'voided')
+          ORDER BY start_date ASC, id ASC`
+      ).catch(() => [[]]);
+
+      // SEC-Samuel-01 (IAM-03, DP-01, DP-02, SCP-01 & SCP-07):
+      // Jangan pernah mengekspor kolom password_hash dari mdl_amto_registrations,
+      // serta terapkan PII Masking (NIK, No. Telepon, Email) untuk pencarian lintas akun & view Manajemen (R08).
+      const safeCols = `id, registration_no, userid, username, fullname, nik, email, phone, organization, amel_no, schedule_id, program_name, doc_ktp, doc_ijazah, doc_pendukung, status, admin_notes, created_by, verified_by, timecreated, timemodified`;
+      let rawRegistrations = [];
+      if (q !== '') {
+        [rawRegistrations] = await pool.query(
+          `SELECT ${safeCols} FROM moodle.mdl_amto_registrations
+            WHERE LOWER(status) NOT IN ('void', 'voided')
+              AND (LOWER(registration_no) = LOWER(?) OR LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?))
+            ORDER BY timecreated DESC`,
+          [q, q, q]
+        ).catch(() => [[]]);
+      } else if (['SUPERADMIN', 'ADMIN'].includes(session.role)) {
+        [rawRegistrations] = await pool.query(
+          `SELECT ${safeCols} FROM moodle.mdl_amto_registrations
+            WHERE LOWER(status) NOT IN ('void', 'voided')
+            ORDER BY timecreated DESC`
+        ).catch(() => [[]]);
+      } else {
+        const uname = session.email.split('@')[0].toLowerCase();
+        [rawRegistrations] = await pool.query(
+          `SELECT ${safeCols} FROM moodle.mdl_amto_registrations
+            WHERE LOWER(status) NOT IN ('void', 'voided')
+              AND (LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?))
+            ORDER BY timecreated DESC`,
+          [session.email, uname]
+        ).catch(() => [[]]);
+      }
+
+      const amtoRole = resolveAmtoRole(session);
+      const isStaffVerifier = ['R04_TM', 'R05_CERT', 'R06_QA', 'R07_ADMIN_IT'].includes(amtoRole);
+      const sessionUname = String(session.email || '').split('@')[0].toLowerCase();
+
+      const registrations = rawRegistrations.map(reg => {
+        const isOwner =
+          String(reg.email || '').trim().toLowerCase() === String(session.email || '').trim().toLowerCase() ||
+          String(reg.username || '').trim().toLowerCase() === sessionUname;
+        const canSeeFullPii = (isOwner || isStaffVerifier) && amtoRole !== 'R08_MANAGEMENT';
+        return {
+          ...reg,
+          nik: canSeeFullPii ? reg.nik : maskNik(reg.nik),
+          phone: canSeeFullPii ? reg.phone : maskPhone(reg.phone),
+          email: (isOwner || isStaffVerifier) ? reg.email : maskEmail(reg.email),
+          doc_ktp: (isOwner || isStaffVerifier) ? reg.doc_ktp : '',
+          doc_ijazah: (isOwner || isStaffVerifier) ? reg.doc_ijazah : '',
+          doc_pendukung: (isOwner || isStaffVerifier) ? reg.doc_pendukung : '',
+        };
+      });
+
+      const [moodleUsers] = await pool.query(
+        `SELECT id, username, firstname, lastname, email
+           FROM moodle.mdl_user
+          WHERE LOWER(email) = LOWER(?) AND deleted = 0 AND suspended = 0
+          LIMIT 1`,
+        [session.email]
+      ).catch(() => [[]]);
+      const lms_account = moodleUsers[0] || null;
+
+      return ok({ schedules, registrations, lms_account });
+    }
+
     if (route === 'admin/registrations') {
       await requireAuth(ADMIN_ROLES);
       const pool = connection();
@@ -1176,7 +1425,27 @@ export async function GET(request, context) {
         JOIN batches b ON b.id = pr.batch_id
         JOIN programs prog ON prog.id = b.program_id
         ORDER BY pr.submitted_at DESC`).catch(() => [[]]);
-      return ok(rows);
+      const [moodleRows] = await pool.query(`
+        SELECT id, registration_no, fullname AS full_name, email, phone, organization, amel_no, program_name, status, admin_notes AS notes, timecreated
+          FROM moodle.mdl_amto_registrations
+         WHERE LOWER(status) NOT IN ('void', 'voided')
+         ORDER BY timecreated DESC
+      `).catch(() => [[]]);
+      const mappedMoodle = moodleRows.map(mr => ({
+        id: `moodle_${mr.id}`,
+        moodle_id: mr.id,
+        full_name: mr.full_name,
+        participant_number: mr.registration_no,
+        phone: mr.phone,
+        email: mr.email,
+        program_name: mr.program_name,
+        batch_name: mr.organization ? `${mr.organization} (${mr.registration_no})` : mr.registration_no,
+        total_amount: 0,
+        status: mr.status === 'approved' ? 'ACCEPTED' : (mr.status === 'rejected' ? 'REJECTED' : 'UNDER_REVIEW'),
+        submitted_at: new Date(Number(mr.timecreated || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+        notes: mr.notes
+      }));
+      return ok([...mappedMoodle, ...rows]);
     }
     if (route.match(/^portal\/programs\/\d+\/form$/)) {
       const programId = route.split('/')[2];
@@ -1219,9 +1488,22 @@ export async function POST(request, context) {
     if (route === 'auth/forgot-password') return await forgotPassword(request);
     if (route === 'auth/reset-password') return await resetPassword(request);
     if (route === 'participants/import' || route === 'instructors/import') return await importCsv(route, request);
-    if (route === 'auth/me') { const session = await getSession(); if (!session) return fail('Unauthorized', 401); const user = await findUserByEmail(session.email); return ok({ ...session, role: normalizeRole(user?.role || user?.resolved_role?.split(',')[0] || session.role), profile: user ? await profileFor(user) : null }); }
+    if (route === 'auth/me') {
+      const session = await getSession();
+      if (!session) return fail('Unauthorized', 401);
+      const user = await findUserByEmail(session.email);
+      const subject = user || session;
+      return ok({
+        ...session,
+        role: normalizeRole(user?.role || user?.resolved_role?.split(',')[0] || session.role),
+        amto_role: resolveAmtoRole(subject),
+        read_only_audit: isReadOnlyAuditSession(subject),
+        profile: user ? await profileFor(user) : null,
+      });
+    }
     if (route.match(/^admin\/programs\/\d+\/fields$/)) {
-      await requireAuth(ADMIN_ROLES);
+      const adminSession = await requireAuth(ADMIN_ROLES);
+      assertNotReadOnlyAdmin(adminSession);
       const programId = route.split('/')[2];
       const data = await body(request);
       const pool = connection();
@@ -1276,6 +1558,7 @@ export async function POST(request, context) {
     if (route.match(/^portal\/registrations\/\d+\/payment$/)) {
       const session = await getSession();
       if (!session) return fail('Unauthorized', 401);
+      assertNotReadOnlyAdmin(session);
       const regId = route.split('/')[2];
       const user = await findUserByEmail(session.email);
       const profile = user ? await profileFor(user) : null;
@@ -1292,17 +1575,177 @@ export async function POST(request, context) {
       await pool.query('UPDATE participant_registrations SET status=?, payment_proof_url=? WHERE id=?', ['UNDER_REVIEW', url, regId]);
       return ok(null, 'Payment proof uploaded.');
     }
-    if (route.match(/^admin\/registrations\/\d+\/verify$/)) {
-      await requireAuth(ADMIN_ROLES);
-      const regId = route.split('/')[2];
+    if (route === 'portal/amto-registration') {
+      const session = await getSession();
+      if (!session) return fail('Unauthorized', 401);
+      const data = await body(request);
+      const fullname = String(data.fullname || '').trim();
+      const username = String(data.username || '').trim().toLowerCase().replace(/[^a-z0-9_.-]/g, '');
+      const nik = String(data.nik || '').trim();
+      const email = String(data.email || session.email || '').trim().toLowerCase();
+      const phone = String(data.phone || '').trim();
+      const organization = String(data.organization || 'Mandiri / Umum').trim();
+      const amel_no = String(data.amel_no || '').trim();
+      const rawPassword = String(data.password || '');
+      const scheduleId = Number(data.schedule_id || 0);
+
+      if (!fullname || !username || !nik || !email || !phone) {
+        return fail('Mohon lengkapi seluruh kolom wajib (Nama Lengkap, Username, NIK, Email, dan No. Telepon).', 422);
+      }
+      if (username === 'admin' || username === 'guest') {
+        return fail('Username tersebut sudah digunakan oleh sistem. Silakan gunakan username peserta lain.', 422);
+      }
+      if (rawPassword.length < 8) {
+        return fail('Kata sandi wajib minimal 8 karakter sesuai kebijakan keamanan IAM-03.', 422);
+      }
+
+      const pool = connection();
+      let progName = 'Verifikasi Kelayakan Peserta (Eligibility Check AMTO)';
+      if (scheduleId > 0) {
+        const [sRows] = await pool.query('SELECT batch_code, program_name FROM moodle.mdl_amto_schedules WHERE id = ? LIMIT 1', [scheduleId]).catch(() => [[]]);
+        if (sRows[0]) {
+          progName = `${sRows[0].batch_code} – ${sRows[0].program_name}`;
+        }
+      }
+
+      const [lastRows] = await pool.query('SELECT id FROM moodle.mdl_amto_registrations ORDER BY id DESC LIMIT 1').catch(() => [[]]);
+      const nextNum = (lastRows[0]?.id ? Number(lastRows[0].id) : 0) + 1;
+      const regNo = `REG-AMTO-2026-${String(nextNum).padStart(4, '0')}`;
+
+      const docKtp = (data.doc_ktp && typeof data.doc_ktp.arrayBuffer === 'function') ? await saveFile(data.doc_ktp, 'documents') : '';
+      const docIjazah = (data.doc_ijazah && typeof data.doc_ijazah.arrayBuffer === 'function') ? await saveFile(data.doc_ijazah, 'documents') : '';
+      const docPendukung = (data.doc_pendukung && typeof data.doc_pendukung.arrayBuffer === 'function') ? await saveFile(data.doc_pendukung, 'documents') : '';
+
+      const passHash = (await bcrypt.hash(rawPassword, 10)).replace(/^\$2[ab]\$/, '$2y$');
+      const nowSec = Math.floor(Date.now() / 1000);
+
+      // Check if this same person (by email, username, or NIK) already has an active registration record
+      const [existingPersonRows] = await pool.query(
+        `SELECT * FROM moodle.mdl_amto_registrations
+          WHERE LOWER(status) NOT IN ('void', 'voided')
+            AND (LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) OR (nik = ? AND nik <> ''))
+          ORDER BY id ASC LIMIT 1`,
+        [email, username, nik]
+      ).catch(() => [[]]);
+
+      let finalId = 0;
+      let finalRegNo = regNo;
+      if (existingPersonRows[0]) {
+        const ex = existingPersonRows[0];
+        finalId = ex.id;
+        finalRegNo = ex.registration_no;
+        await pool.query(
+          `UPDATE moodle.mdl_amto_registrations
+              SET username=?, fullname=?, nik=?, email=?, phone=?, organization=?, amel_no=?,
+                  schedule_id=CASE WHEN ?>0 THEN ? ELSE schedule_id END,
+                  program_name=CASE WHEN ?>0 THEN ? ELSE program_name END,
+                  password_hash=?,
+                  doc_ktp=CASE WHEN ?<>'' THEN ? ELSE doc_ktp END,
+                  doc_ijazah=CASE WHEN ?<>'' THEN ? ELSE doc_ijazah END,
+                  doc_pendukung=CASE WHEN ?<>'' THEN ? ELSE doc_pendukung END,
+                  status='pending',
+                  admin_notes='Berkas pengajuan ulang (revisi) menunggu verifikasi Admin / Training Manager.',
+                  timemodified=?
+            WHERE id=?`,
+          [
+            username, fullname, nik, email, phone, organization, amel_no,
+            scheduleId, scheduleId,
+            scheduleId, progName,
+            passHash,
+            docKtp, docKtp,
+            docIjazah, docIjazah,
+            docPendukung, docPendukung,
+            nowSec, finalId
+          ]
+        );
+      } else {
+        const [ins] = await pool.query(
+          `INSERT INTO moodle.mdl_amto_registrations
+            (registration_no, userid, username, fullname, nik, email, phone, organization, amel_no, schedule_id, program_name, password_hash, doc_ktp, doc_ijazah, doc_pendukung, status, admin_notes, created_by, verified_by, timecreated, timemodified)
+           VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'Menunggu verifikasi berkas prasyarat oleh Admin / Training Manager.', 0, 0, ?, ?)`,
+          [regNo, username, fullname, nik, email, phone, organization, amel_no, scheduleId, progName, passHash, docKtp, docIjazah, docPendukung, nowSec, nowSec]
+        );
+        finalId = ins.insertId;
+      }
+
+      await pool.query(
+        `INSERT INTO participants (participant_number, full_name, phone, email, status, nik, institution, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE full_name=VALUES(full_name), phone=VALUES(phone), nik=VALUES(nik), institution=VALUES(institution), updated_at=NOW()`,
+        [finalRegNo, fullname, phone, email, nik.slice(0, 20), organization]
+      ).catch(() => {});
+
+      return ok({ id: finalId, registration_no: finalRegNo }, 'Berkas registrasi & verifikasi kelayakan berhasil dikirim.');
+    }
+
+    if (route.match(/^admin\/registrations\/[^/]+\/verify$/)) {
+      const session = await requireAuth(ADMIN_ROLES);
+      assertNotReadOnlyAdmin(session);
+      const rawId = route.split('/')[2];
       const data = await body(request);
       const status = data.status;
       const notes = data.notes || null;
       const pool = connection();
+
+      if (String(rawId).startsWith('moodle_')) {
+        const moodleId = Number(String(rawId).replace('moodle_', ''));
+        const mStatus = (status === 'ACCEPTED') ? 'approved' : 'rejected';
+        const mNotes = notes || (status === 'ACCEPTED' ? 'Berkas lengkap & terverifikasi (Eligible). Akun LMS telah diaktifkan.' : 'Berkas prasyarat belum sesuai / perlu revisi.');
+        const nowSec = Math.floor(Date.now() / 1000);
+
+        let targetUserId = 0;
+        if (mStatus === 'approved') {
+          const [regRows] = await pool.query('SELECT * FROM moodle.mdl_amto_registrations WHERE id=? LIMIT 1', [moodleId]).catch(() => [[]]);
+          const reg = regRows[0];
+          if (reg) {
+            const parts = String(reg.fullname || '').trim().split(/\s+/);
+            const firstname = parts[0] || reg.fullname || 'Peserta';
+            const lastname = parts.slice(1).join(' ') || 'AMTO';
+            const [existUsers] = await pool.query(
+              'SELECT id FROM moodle.mdl_user WHERE (LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?)) AND deleted=0 LIMIT 1',
+              [reg.username, reg.email]
+            ).catch(() => [[]]);
+            if (existUsers[0]) {
+              targetUserId = existUsers[0].id;
+              await pool.query(
+                'UPDATE moodle.mdl_user SET confirmed=1, suspended=0, firstname=?, lastname=?, email=?, password=?, timemodified=? WHERE id=?',
+                [firstname, lastname, reg.email, reg.password_hash, nowSec, targetUserId]
+              ).catch(() => {});
+            } else {
+              const [insU] = await pool.query(
+                `INSERT INTO moodle.mdl_user
+                  (auth, confirmed, policyagreed, deleted, suspended, mnethostid, username, password, idnumber, firstname, lastname, email, phone1, institution, city, country, lang, timecreated, timemodified)
+                 VALUES ('manual', 1, 1, 0, 0, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'Bandung', 'ID', 'en', ?, ?)`,
+                [reg.username, reg.password_hash, reg.registration_no, firstname, lastname, reg.email, reg.phone || '', reg.organization || '', nowSec, nowSec]
+              ).catch(() => [{ insertId: 0 }]);
+              targetUserId = insU.insertId || 0;
+            }
+            if (targetUserId > 0) {
+              const [roles] = await pool.query("SELECT id FROM moodle.mdl_role WHERE shortname IN ('student', 'r01_trainee')").catch(() => [[]]);
+              for (const r of roles) {
+                const [existRa] = await pool.query('SELECT id FROM moodle.mdl_role_assignments WHERE roleid=? AND contextid=1 AND userid=? LIMIT 1', [r.id, targetUserId]).catch(() => [[]]);
+                if (!existRa[0]) {
+                  await pool.query(
+                    'INSERT INTO moodle.mdl_role_assignments (roleid, contextid, userid, timemodified, modifierid) VALUES (?, 1, ?, ?, 2)',
+                    [r.id, targetUserId, nowSec]
+                  ).catch(() => {});
+                }
+              }
+            }
+          }
+        }
+
+        await pool.query(
+          'UPDATE moodle.mdl_amto_registrations SET userid=CASE WHEN ?>0 THEN ? ELSE userid END, status=?, admin_notes=?, timemodified=? WHERE id=?',
+          [targetUserId, targetUserId, mStatus, mNotes, nowSec, moodleId]
+        );
+        return ok(null, 'Status verifikasi kelayakan peserta berhasil diperbarui.');
+      }
+
+      const regId = rawId;
       const [regRows] = await pool.query('SELECT * FROM participant_registrations WHERE id=?', [regId]);
       if (!regRows[0]) return fail('Registration not found', 404);
       const reg = regRows[0];
-      const session = await getSession();
       await pool.query('UPDATE participant_registrations SET status=?, notes=?, reviewed_at=NOW(), reviewed_by=? WHERE id=?', [status, notes, session.id, regId]);
       if (status === 'ACCEPTED') {
         await pool.query('INSERT IGNORE INTO batch_participants (batch_id, participant_id, status) VALUES (?,?,?)', [reg.batch_id, reg.participant_id, 'ENROLLED']);
@@ -1357,7 +1800,8 @@ export async function POST(request, context) {
 
     // ── module_topics POST (admin) ───────────────────────────────────────────
     if (route === 'module_topics') {
-      await requireAuth(ADMIN_ROLES);
+      const adminSession = await requireAuth(ADMIN_ROLES);
+      assertNotReadOnlyAdmin(adminSession);
       const pool = connection();
       const data = await body(request);
       const { module_id, title, description, sequence_no, duration_hours } = data;
@@ -1449,7 +1893,8 @@ export async function PUT(request, context) {
 
     // ── module_topics PUT (admin) ────────────────────────────────────────────
     if (route === 'module_topics') {
-      await requireAuth(ADMIN_ROLES);
+      const adminSession = await requireAuth(ADMIN_ROLES);
+      assertNotReadOnlyAdmin(adminSession);
       const pool = connection();
       const data = await body(request);
       const targetId = params.get('id') || data.id;
@@ -1464,8 +1909,8 @@ export async function PUT(request, context) {
 
     // ── BAP PUT — admin approve, reject, or request revision ────────────────
     if (route.match(/^bap\/\d+$/)) {
-      await requireAuth(ADMIN_ROLES);
-      const adminSession = await getSession();
+      const adminSession = await requireAuth(ADMIN_ROLES);
+      assertNotReadOnlyAdmin(adminSession);
       const bapId = Number(route.split('/')[1]);
       const pool = connection();
       const data = await body(request);
@@ -1597,16 +2042,16 @@ export async function DELETE(request, context) {
   catch (e) { return fail(e.message || 'Server error.', e.status || 500); }
 }
 
-export async function OPTIONS() {
-  const origin = process.env.CORS_ORIGIN || '*';
+export async function OPTIONS(request) {
+  const requestOrigin = request?.headers?.get('origin') || null;
   return new Response(null, {
     status: 204,
     headers: {
-      'Access-Control-Allow-Origin': origin,
+      ...SECURITY_HEADERS,
+      ...buildCorsHeaders(requestOrigin),
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept',
-      'Access-Control-Allow-Credentials': origin === '*' ? 'false' : 'true',
-      'Access-Control-Max-Age': '86400'
-    }
+      'Access-Control-Max-Age': '86400',
+    },
   });
 }

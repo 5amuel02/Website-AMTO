@@ -6,5 +6,17 @@ export const TABLES = {
   'module_topics': 'module_topics',
 };
 
-export const ADMIN_ROLES = ['SUPERADMIN', 'ADMIN'];
-export const ROLE_ORDER = ['SUPERADMIN', 'ADMIN', 'INSTRUKTUR', 'PESERTA'];
+export const ADMIN_ROLES = ['SUPERADMIN', 'ADMIN', 'QA', 'MANAGEMENT'];
+export const READ_ONLY_ADMIN_ROLES = ['QA', 'R06_QA', 'MANAGEMENT', 'MANAJEMEN', 'R08_MANAGEMENT'];
+export const READ_ONLY_ADMIN_EMAILS = [
+  'btardjani81@gmail.com',
+  'qa@tatc.id',
+  'umismd@gmail.com',
+  'asfriyantot@gmail.com',
+  'indset69@gmail.com',
+  'anggarusdinar@telkomuniversity.ac.id',
+  'manajemen@tatc.id',
+  'management@tatc.id',
+];
+export const ROLE_ORDER = ['SUPERADMIN', 'ADMIN', 'QA', 'MANAGEMENT', 'INSTRUKTUR', 'PESERTA'];
+

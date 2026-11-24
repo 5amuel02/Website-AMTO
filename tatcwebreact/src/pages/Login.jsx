@@ -98,8 +98,8 @@ function Login() {
 
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <div style={{ textAlign: 'left' }}>
-              <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: '600', marginBottom: '0.5rem' }}>Email Address</label>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required style={{ width: '100%', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--background-main)', color: 'var(--text-main)', outline: 'none' }} />
+              <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: '600', marginBottom: '0.5rem' }}>Email Address / Username</label>
+              <input type="text" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email atau Username (contoh: ImanJM / imanjanuar44@gmail.com)" required style={{ width: '100%', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--background-main)', color: 'var(--text-main)', outline: 'none' }} />
             </div>
             <div style={{ textAlign: 'left' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>

@@ -152,11 +152,11 @@ const RegistrationVerification = () => {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
               <button onClick={() => setSelectedReg(null)} style={{ padding: '8px 16px', background: 'transparent', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', color: 'var(--text-main)' }}>Tutup</button>
-              {selectedReg.status === 'UNDER_REVIEW' && (
-                <>
-                  <button onClick={() => handleVerify('REJECTED')} style={{ padding: '8px 16px', background: '#fee2e2', color: '#991b1b', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Tolak</button>
-                  <button onClick={() => handleVerify('ACCEPTED')} style={{ padding: '8px 16px', background: '#10b981', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Terima</button>
-                </>
+              {selectedReg.status !== 'ACCEPTED' && (
+                <button onClick={() => handleVerify('ACCEPTED')} style={{ padding: '8px 16px', background: '#10b981', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Terima / Approve</button>
+              )}
+              {selectedReg.status !== 'REJECTED' && (
+                <button onClick={() => handleVerify('REJECTED')} style={{ padding: '8px 16px', background: '#fee2e2', color: '#991b1b', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Tolak</button>
               )}
             </div>
           </div>

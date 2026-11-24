@@ -104,8 +104,9 @@ set_config('cronclionly', 1);
 $blocked_hosts = "127.0.0.0/8\n169.254.169.254\nlocalhost\n0.0.0.0/8\n::1";
 set_config('curlsecurityblockedhosts', $blocked_hosts);
 
-// IAM-01 Allow login via either Username LMS OR Email Portal (@tatc.id)
+// IAM-01 Allow login via either Username LMS OR Email Portal (@tatc.id) & allow space in username (e.g. 'Beng Tardjani')
 set_config('authloginviaemail', 1);
+set_config('extendedusernamechars', 1);
 
 echo " [+] Applied IAM-03 Password Policy, IAM-05 Reset Expiry, IAM-06 Lockout, IAM-07 Session Timeout, and APP-01 SSRF Protection.\n";
 
@@ -144,28 +145,67 @@ $test_accounts = [
         'courserole'=> 'teacher',
     ],
     [
-        'username'  => 'trainingmanager',
-        'email'     => 'tm@tatc.id',
-        'firstname' => 'Juhandi',
-        'lastname'  => 'Training Manager',
-        'role'      => 'r04_trainingmanager',
-        'courserole'=> 'editingteacher',
+        'username'      => 'Ema',
+        'email'         => 'emacdef@telkomuniversity.ac.id',
+        'firstname'     => 'Ema',
+        'lastname'      => '',
+        'role'          => 'r04_trainingmanager',
+        'courserole'    => 'editingteacher',
+        'password'      => 'emacdef12345',
     ],
     [
-        'username'  => 'certofficer',
-        'email'     => 'cert@tatc.id',
-        'firstname' => 'Iman',
-        'lastname'  => 'Setiawan',
-        'role'      => 'r05_certofficer',
-        'courserole'=> 'teacher',
+        'username'      => 'Juhandi',
+        'email'         => 'juhandi@gmail.com',
+        'firstname'     => 'Juhandi',
+        'lastname'      => '',
+        'role'          => 'r04_trainingmanager',
+        'courserole'    => 'editingteacher',
+        'password'      => 'Juhandi12345',
     ],
     [
-        'username'  => 'qa',
-        'email'     => 'qa@tatc.id',
-        'firstname' => 'Drs. Beng',
-        'lastname'  => 'Kusuma',
-        'role'      => 'r06_qa',
-        'courserole'=> 'teacher',
+        'username'      => 'ImanJM',
+        'email'         => 'imanjanuar44@gmail.com',
+        'password'      => 'Imanjanuar12345',
+        'firstname'     => 'Iman',
+        'lastname'      => 'Januar M',
+        'role'          => 'r05_certofficer',
+        'courserole'    => 'teacher',
+    ],
+    [
+        'username'      => 'Beng Tardjani',
+        'email'         => 'Btardjani81@gmail.com',
+        'password'      => 'Btardjani12345',
+        'firstname'     => 'Beng',
+        'lastname'      => 'Tardjani',
+        'role'          => 'r06_qa',
+        'courserole'    => 'teacher',
+    ],
+    [
+        'username'   => 'Umi',
+        'email'      => 'umismd@gmail.com',
+        'password'   => 'Umi12345',
+        'firstname'  => 'Rita',
+        'lastname'   => 'Sri Mutiari D',
+        'role'       => 'r06_qa',
+        'courserole' => 'teacher',
+    ],
+    [
+        'username'   => 'Teguh',
+        'email'      => 'asfriyantot@gmail.com',
+        'password'   => 'Teguhasfriyanto12345',
+        'firstname'  => 'Teguh',
+        'lastname'   => 'Asfriyanto',
+        'role'       => 'r06_qa',
+        'courserole' => 'teacher',
+    ],
+    [
+        'username'   => 'Indra',
+        'email'      => 'indset69@gmail.com',
+        'password'   => 'Idra12345',
+        'firstname'  => 'Indra',
+        'lastname'   => 'Setyo Tri Santoso',
+        'role'       => 'r06_qa',
+        'courserole' => 'teacher',
     ],
     [
         'username'  => 'admin',
@@ -176,12 +216,13 @@ $test_accounts = [
         'courserole'=> 'editingteacher',
     ],
     [
-        'username'  => 'management',
-        'email'     => 'manajemen@tatc.id',
-        'firstname' => 'Ir. Angga',
-        'lastname'  => 'Dirgantara',
-        'role'      => 'r08_management',
-        'courserole'=> null,
+        'username'      => 'anggarusdinar',
+        'email'         => 'anggarusdinar@telkomuniversity.ac.id',
+        'password'      => 'anggarusdinar12345',
+        'firstname'     => 'Angga',
+        'lastname'      => 'Rusdinar',
+        'role'          => 'r08_management',
+        'courserole'    => null,
     ],
 ];
 
@@ -189,7 +230,32 @@ $courses = $DB->get_records_select('course', 'id > 1');
 $enrol_manual = enrol_get_plugin('manual');
 
 foreach ($test_accounts as $acc) {
-    $u = $DB->get_record('user', ['username' => $acc['username'], 'mnethostid' => $CFG->mnet_localhost_id]);
+    $acc_pass = $acc['password'] ?? $default_pass;
+    $acc_pass_hash = hash_internal_user_password($acc_pass);
+    // Moodle mewajibkan kolom mdl_user.username disimpan lowercase; form login otomatis mengubah input 'ImanJM' -> 'imanjm'
+    $moodle_uname = strtolower(trim($acc['username']));
+
+    $u = $DB->get_record('user', ['username' => $moodle_uname, 'mnethostid' => $CFG->mnet_localhost_id]);
+    if (!$u) {
+        $u = $DB->get_record('user', ['username' => $acc['username'], 'mnethostid' => $CFG->mnet_localhost_id]);
+    }
+    if (!$u && !empty($acc['old_usernames'])) {
+        foreach ($acc['old_usernames'] as $old_uname) {
+            $u = $DB->get_record('user', ['username' => strtolower($old_uname), 'mnethostid' => $CFG->mnet_localhost_id]);
+            if ($u) {
+                break;
+            }
+        }
+    }
+    if (!$u && !empty($acc['old_emails'])) {
+        foreach ($acc['old_emails'] as $old_email) {
+            $u = $DB->get_record('user', ['email' => $old_email, 'mnethostid' => $CFG->mnet_localhost_id]);
+            if ($u) {
+                break;
+            }
+        }
+    }
+
     if (!$u) {
         $u = new stdClass();
         $u->auth         = 'manual';
@@ -198,8 +264,8 @@ foreach ($test_accounts as $acc) {
         $u->deleted      = 0;
         $u->suspended    = 0;
         $u->mnethostid   = $CFG->mnet_localhost_id;
-        $u->username     = $acc['username'];
-        $u->password     = $pass_hash;
+        $u->username     = $moodle_uname;
+        $u->password     = $acc_pass_hash;
         $u->firstname    = $acc['firstname'];
         $u->lastname     = $acc['lastname'];
         $u->email        = $acc['email'];
@@ -209,19 +275,20 @@ foreach ($test_accounts as $acc) {
         $u->timecreated  = time();
         $u->timemodified = time();
         $u->id = $DB->insert_record('user', $u);
-        echo " [+] Created User: {$acc['username']} ({$acc['email']}) -> ID {$u->id}\n";
+        echo " [+] Created User: {$acc['username']} (login: {$moodle_uname} / {$acc['email']}) -> ID {$u->id}\n";
     } else {
         $u->auth         = 'manual';
         $u->confirmed    = 1;
         $u->deleted      = 0;
         $u->suspended    = 0;
-        $u->password     = $pass_hash;
+        $u->username     = $moodle_uname;
+        $u->password     = $acc_pass_hash;
         $u->email        = $acc['email'];
         $u->firstname    = $acc['firstname'];
         $u->lastname     = $acc['lastname'];
         $u->timemodified = time();
         $DB->update_record('user', $u);
-        echo " [=] Updated User & Reset Password: {$acc['username']} ({$acc['email']}) -> ID {$u->id}\n";
+        echo " [=] Updated User & Reset Password: {$acc['username']} (login: {$moodle_uname} / {$acc['email']}) -> ID {$u->id}\n";
     }
 
     // Clear any lockout or forcepasswordchange flags so login works immediately
@@ -258,12 +325,12 @@ foreach ($test_accounts as $acc) {
     // Verify authenticate_user_login works
     $reason = null;
     $errorcode = null;
-    $auth_ok = authenticate_user_login($acc['username'], $default_pass, false, $errorcode);
-    echo "     -> Auth Check ({$acc['username']} / {$default_pass}): " . ($auth_ok ? "OK (UID {$auth_ok->id})" : "FAILED (code {$errorcode})") . "\n";
+    $auth_ok = authenticate_user_login($acc['username'], $acc_pass, false, $errorcode);
+    echo "     -> Auth Check ({$acc['username']} / {$acc_pass}): " . ($auth_ok ? "OK (UID {$auth_ok->id})" : "FAILED (code {$errorcode})") . "\n";
 
     // Also ensure the account exists in tatc_web.users (Portal React) with matching bcryptjs ($2a$10$) password hash
     try {
-        $tatc_bcrypt_hash = str_replace('$2y$', '$2a$', password_hash($default_pass, PASSWORD_BCRYPT));
+        $tatc_bcrypt_hash = str_replace('$2y$', '$2a$', password_hash($acc_pass, PASSWORD_BCRYPT));
         $tatc_role = 'ADMIN';
         if ($acc['role'] === 'r01_trainee') {
             $tatc_role = 'PESERTA';
@@ -273,15 +340,52 @@ foreach ($test_accounts as $acc) {
             $tatc_role = 'SUPERADMIN';
         }
         $full_name = trim($acc['firstname'] . ' ' . $acc['lastname']);
+        if (!empty($acc['old_emails'])) {
+            foreach ($acc['old_emails'] as $old_email) {
+                try {
+                    $DB->execute(
+                        "UPDATE IGNORE tatc_web.users SET email = ? WHERE email = ?",
+                        [$acc['email'], $old_email]
+                    );
+                } catch (Throwable $e) {
+                    // Ignore if old email not present
+                }
+            }
+        }
         $DB->execute(
-            "INSERT INTO tatc_web.users (email, password_hash, role, status, email_verified_at, name, failed_login_attempts, created_at, updated_at)
-             VALUES (?, ?, ?, 'ACTIVE', NOW(), ?, 0, NOW(), NOW())
-             ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), role = VALUES(role), status = 'ACTIVE', name = VALUES(name), failed_login_attempts = 0, lockout_until = NULL",
-            [$acc['email'], $tatc_bcrypt_hash, $tatc_role, $full_name]
+            "INSERT INTO tatc_web.users (email, password_hash, role, status, email_verified_at, created_at, updated_at)
+             VALUES (?, ?, ?, 'ACTIVE', NOW(), NOW(), NOW())
+             ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), role = VALUES(role), status = 'ACTIVE', email_verified_at = NOW()",
+            [$acc['email'], $tatc_bcrypt_hash, $tatc_role]
         );
     } catch (Throwable $e) {
         // Ignore if tatc_web is not present
     }
+}
+
+// Also ensure the 2 new Portal TATC test participant accounts (dimas@tatc.id & reza@tatc.id) exist in tatc_web for registration flow testing
+try {
+    $tatc_bcrypt_hash = str_replace('$2y$', '$2a$', password_hash($default_pass, PASSWORD_BCRYPT));
+    $portal_only_participants = [
+        ['email' => 'dimas@tatc.id', 'p_number' => 'P-2026-NEW01', 'full_name' => 'Dimas Saputra',   'nik' => '3273011508990002', 'phone' => '081288997766', 'institution' => 'Telkom University'],
+        ['email' => 'reza@tatc.id',  'p_number' => 'P-2026-NEW02', 'full_name' => 'Reza Firmansyah', 'nik' => '3273012204000003', 'phone' => '081377889900', 'institution' => 'GMF AeroAsia / Calon Peserta'],
+    ];
+    foreach ($portal_only_participants as $pop) {
+        $DB->execute(
+            "INSERT INTO tatc_web.users (email, password_hash, role, status, email_verified_at, created_at, updated_at)
+             VALUES (?, ?, 'PESERTA', 'ACTIVE', NOW(), NOW(), NOW())
+             ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), role = 'PESERTA', status = 'ACTIVE', email_verified_at = NOW()",
+            [$pop['email'], $tatc_bcrypt_hash]
+        );
+        $DB->execute(
+            "INSERT INTO tatc_web.participants (participant_number, full_name, nik, phone, email, institution, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', NOW(), NOW())
+             ON DUPLICATE KEY UPDATE full_name = VALUES(full_name), nik = VALUES(nik), phone = VALUES(phone), institution = VALUES(institution), status = 'ACTIVE'",
+            [$pop['p_number'], $pop['full_name'], $pop['nik'], $pop['phone'], $pop['email'], $pop['institution']]
+        );
+    }
+} catch (Throwable $e) {
+    // Ignore if tatc_web is not present
 }
 
 echo "=== 8 Role RBAC & Official Test Accounts Provisioning Completed ===\n";
